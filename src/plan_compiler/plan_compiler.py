@@ -43,7 +43,8 @@ def _parse_intent(intent: str) -> Dict[str, Any]:
     
     # Simple heuristic: split on verbs that are followed by nouns
     # This is a very naive approach; in production we'd use a proper parser.
-    verbs = re.findall(r'\b(?:create|read|write|delete|list|download|upload|modify|execute|run|query|fetch|submit|review|approve|deny)(\s+)([^,\.\n]+)', intent, flags=re.IGNORECASE)
+    # Capture the verb and the object
+    verbs = re.findall(r'\b(create|read|write|delete|list|download|upload|modify|execute|run|query|fetch|submit|review|approve|deny)\b\s+([^,\.\n]+)', intent, flags=re.IGNORECASE)
     
     actions = []
     for verb, obj in verbs:
@@ -95,14 +96,47 @@ def _build_plan_from_intent(intent: str, plan_id: str) -> Plan:
     description = parsed["description"]
     actions = parsed["actions"]
     
+    # Map natural language verbs to valid action types
+    verb_to_action = {
+        "create": "file_write",
+        "read": "file_read",
+        "write": "file_write",
+        "delete": "file_delete",
+        "list": "file_list",
+        "download": "http_get",
+        "upload": "http_post",
+        "modify": "file_write",
+        "execute": "shell_command",
+        "run": "shell_command",
+        "query": "database_query",
+        "fetch": "http_get",
+        "submit": "http_post",
+        "review": "file_read",
+        "approve": "file_read",
+        "deny": "file_read",
+    }
+    
     steps: List[Step] = []
     for idx, act in enumerate(actions, start=1):
         step_id = _generate_step_id("step", idx)
+        verb = act["verb"]
+        obj = act["object"]
+        action_type = verb_to_action.get(verb, verb)  # fallback to verb if not mapped
+        
+        # Better resource detection
+        resource = None
+        if action_type.startswith("file_") or action_type.startswith("shell_"):
+            resource = obj
+        elif action_type.startswith("http_"):
+            resource = obj
+        elif action_type.startswith("database_"):
+            resource = obj
+        
         step = Step(
             id=step_id,
-            description=f"Step {idx}: {act['verb'].title()} {act['object']}",
-            action_type=act["verb"],
-            resource=act["object"] if act["object"].lower() in ("file", "url", "path") else None,
+            description=f"Step {idx}: {verb.title()} {obj}",
+            action_type=action_type,
+            resource=resource,
             pre_conditions=[],
             post_conditions=[]
         )
