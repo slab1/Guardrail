@@ -1,0 +1,32 @@
+# .gitignore
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# IDE / editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# OS files
+Thumbs.db
