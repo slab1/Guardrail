@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
-from causal_audit import CausalAuditLogger, get_audit_logger, AuditEventType
+from guardrail.causal_audit import CausalAuditLogger, get_audit_logger, AuditEventType
 
 
 class TrustLevel(Enum):

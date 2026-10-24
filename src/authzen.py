@@ -7,9 +7,9 @@ from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from threading import Lock
-from causal_audit import get_audit_logger, AuditEventType, CausalLabel
-from autopilot import get_autopilot, TrustLevel
-from pep_framework import PEPType
+from guardrail.causal_audit import get_audit_logger, AuditEventType, CausalLabel
+from guardrail.autopilot import get_autopilot, TrustLevel
+from guardrail.pep_framework import PEPType
 
 
 class DecisionType(Enum):
@@ -213,7 +213,7 @@ class AuthZENDecisionEngine:
             # This is a step-level decision
             if token:
                 # Validate token
-                from plan_compiler.enhanced_plan_compiler import validate_step_token_for_execution
+                from guardrail.plan_compiler.enhanced_plan_compiler import validate_step_token_for_execution
                 token_valid = validate_step_token_for_execution(
                     plan_id, step_id, token, agent_class, user_id, autonomy_level
                 )
@@ -228,7 +228,7 @@ class AuthZENDecisionEngine:
                     }
             
             # Check step consent
-            from consent_manager import is_step_approved
+            from guardrail.consent_manager import is_step_approved
             if not is_step_approved(plan_id, step_id):
                 self.autopilot.on_consent_decision(agent_id, plan_id, False)
                 return {
@@ -239,7 +239,7 @@ class AuthZENDecisionEngine:
                 }
             
             # Check PEP enforcement
-            from pep_framework import PEPRequest, PEPType, enforce_pep
+            from guardrail.pep_framework import PEPRequest, PEPType, enforce_pep
             
             # Determine PEP type from action
             pep_type = self._map_action_to_pep(action)
@@ -286,7 +286,7 @@ class AuthZENDecisionEngine:
         
         # Plan-level decision (no step context)
         # Check if plan is approved
-        from consent_manager import is_plan_approved
+        from guardrail.consent_manager import is_plan_approved
         if plan_id and not is_plan_approved(plan_id):
             return {
                 "decision": DecisionType.DENY,
@@ -553,7 +553,7 @@ if __name__ == "__main__":
     print(f"Delegation created: {delegation_id}")
     
     # Create AuthZEN request
-    from authzen import AuthZENSubject, AuthZENResource, AuthZENAction, AuthZENContext
+    from guardrail.authzen import AuthZENSubject, AuthZENResource, AuthZENAction, AuthZENContext
     
     subject = AuthZENSubject(
         subject_id=agent_id,

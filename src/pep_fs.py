@@ -7,7 +7,7 @@ import hashlib
 from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from pathlib import Path
-from pep_framework import BasePEP, PEPRequest, PEPResponse, PEPType, register_pep
+from guardrail.pep_framework import BasePEP, PEPRequest, PEPResponse, PEPType, register_pep
 
 
 @dataclass
@@ -383,7 +383,7 @@ if __name__ == "__main__":
     pep_fs = create_pep_fs()
     
     # Test write
-    from token_service import create_step_token
+    from guardrail.token_service import create_step_token
     token = create_step_token("plan_001", "step_001", "Write config", "coding", "user1", 1)
     
     request = PEPRequest(

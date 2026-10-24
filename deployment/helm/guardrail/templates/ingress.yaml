@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: guardrail
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: guardrail
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  {{- if .Values.guardrail.ingress.annotations }}
+  annotations:
+    {{- toYaml .Values.guardrail.ingress.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.guardrail.ingress.className }}
+  ingressClassName: {{ .Values.guardrail.ingress.className }}
+  {{- end }}
+  {{- if .Values.guardrail.ingress.tls }}
+  tls:
+    {{- toYaml .Values.guardrail.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- toYaml .Values.guardrail.ingress.hosts | nindent 4 }}

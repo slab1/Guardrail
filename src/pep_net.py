@@ -8,7 +8,7 @@ import time
 from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
-from pep_framework import BasePEP, PEPRequest, PEPResponse, PEPType, register_pep
+from guardrail.pep_framework import BasePEP, PEPRequest, PEPResponse, PEPType, register_pep
 
 
 class NetworkAction(Enum):
@@ -387,7 +387,7 @@ def create_pep_net() -> PepNet:
 if __name__ == "__main__":
     pep_net = create_pep_net()
     
-    from token_service import create_step_token
+    from guardrail.token_service import create_step_token
     
     token = create_step_token("plan_001", "step_001", "HTTP GET to GitHub API", "coding", "user1", 1)
     

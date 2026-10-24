@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import defaultdict
-from monitoring import get_metrics, MetricsRegistry
-from authzen import get_spiffe_provider, SPIFFEIdentityProvider
+from guardrail.monitoring import get_metrics, MetricsRegistry
+from guardrail.authzen import get_spiffe_provider, SPIFFEIdentityProvider
 
 
 class ScalingStrategy(Enum):
@@ -167,7 +167,8 @@ class LoadBalancer:
                 return instances[idx]
             
             elif self.algorithm == LoadBalancingAlgorithm.LEAST_CONNECTIONS:
-                return min(instances, key=lambda i: self.connection_counts.get(i.instance_id, 0))
+                # Use connection count as primary key, instance_id as tiebreaker for deterministic distribution
+                return min(instances, key=lambda i: (self.connection_counts.get(i.instance_id, 0), i.instance_id))
             
             elif self.algorithm == LoadBalancingAlgorithm.LEAST_LATENCY:
                 def avg_latency(inst):

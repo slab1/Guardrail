@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List, Callable
 from enum import Enum
-from plan_compiler.enhanced_plan_compiler import ValidatedPlan
+from guardrail.plan_compiler.enhanced_plan_compiler import ValidatedPlan
 
 
 class ConsentStatus(Enum):
@@ -206,7 +206,7 @@ def simple_cli_consent_callback(request: ConsentRequest) -> ConsentDecision:
 
 if __name__ == "__main__":
     # Test the consent system
-    from plan_compiler.enhanced_plan_compiler import compile_and_validate_plan
+    from guardrail.plan_compiler.enhanced_plan_compiler import compile_and_validate_plan
     
     intent = "Create a new file called config.yaml in /etc/ and then run a validation script on it."
     vplan = compile_and_validate_plan(intent, agent_class="coding", user_id="user123", autonomy_level=2)

@@ -6,14 +6,14 @@ import tempfile
 # Add src to Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from pep_framework import (
+from guardrail.pep_framework import (
     BasePEP, PEPRequest, PEPResponse, PEPType, PEPRegistry,
     get_pep_registry, register_pep, enforce_pep
 )
-from pep_fs import PepFs, LSFSStore, create_pep_fs
-from pep_exec import PepExec, FirecrackerManager, MicroVMConfig, create_pep_exec
-from pep_net import PepNet, NetworkPolicyEngine, NetworkRule, NetworkAction, create_pep_net
-from token_service import create_step_token
+from guardrail.pep_fs import PepFs, LSFSStore, create_pep_fs
+from guardrail.pep_exec import PepExec, FirecrackerManager, MicroVMConfig, create_pep_exec
+from guardrail.pep_net import PepNet, NetworkPolicyEngine, NetworkRule, NetworkAction, create_pep_net
+from guardrail.token_service import create_step_token
 
 
 # ----------------------------------------------------------------------

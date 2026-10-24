@@ -1,11 +1,16 @@
 """ReAct adapter for Guardrail integration."""
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from typing import Any, Dict, List, Optional, Callable
 from dataclasses import dataclass, field
-from plan_compiler.enhanced_plan_compiler import (
+from guardrail.plan_compiler.enhanced_plan_compiler import (
     ValidatedPlan, ValidatedStep, compile_and_validate_plan, validate_step_token_for_execution
 )
-from token_service import validate_plan_token, validate_step_token
-from consent_manager import is_plan_approved, is_step_approved
+from guardrail.token_service import validate_plan_token, validate_step_token
+from guardrail.consent_manager import is_plan_approved, is_step_approved
+from guardrail.tools.executor import RealToolExecutor, create_tool_executor
 
 
 @dataclass
@@ -30,24 +35,26 @@ class ReActAdapter:
         agent_class: str = "coding",
         user_id: str = "user",
         autonomy_level: int = 1,
-        tool_executor: Optional[Callable[[ValidatedStep], Any]] = None,
-        llm_reasoner: Optional[Callable[[str, List[str], List[Dict]], str]] = None
+        tool_executor: Optional[Callable] = None,
+        llm_reasoner: Optional[Callable[[str, List[str], List[Dict]], str]] = None,
+        allowed_paths: List[str] = None,
+        command_timeout: int = 30
     ):
         self.agent_class = agent_class
         self.user_id = user_id
         self.autonomy_level = autonomy_level
-        self.tool_executor = tool_executor or self._default_executor
+        
+        # Create real tool executor if not provided
+        if tool_executor is None:
+            self.executor = RealToolExecutor(
+                allowed_paths=allowed_paths,
+                command_timeout=command_timeout
+            )
+            self.tool_executor = create_tool_executor("generic", self.executor)
+        else:
+            self.tool_executor = tool_executor
+        
         self.llm_reasoner = llm_reasoner or self._default_reasoner
-    
-    def _default_executor(self, step: ValidatedStep) -> Dict[str, Any]:
-        """Default tool executor that returns mock results."""
-        return {
-            "status": "executed",
-            "step_id": step.id,
-            "action": step.action_type,
-            "resource": step.resource,
-            "result": f"Mock execution of {step.action_type} on {step.resource}",
-        }
     
     def _default_reasoner(self, intent: str, observations: List[str], actions: List[Dict]) -> str:
         """Default reasoning function (placeholder)."""
@@ -195,7 +202,7 @@ if __name__ == "__main__":
         autonomy_level=2
     )
     
-    intent = "Create a new file called config.yaml in /etc/ and then run a validation script on it."
+    intent = "Create a new file called config.yaml in /tmp/ and then run a validation script on it."
     result = adapter.run(intent)
     
     summary = adapter.get_summary(result)

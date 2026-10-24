@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 import threading
-from causal_audit import get_audit_logger, CausalAuditLogger
-from autopilot import get_autopilot, AutopilotController
-from monitoring import get_metrics, MetricsRegistry
+from guardrail.causal_audit import get_audit_logger, CausalAuditLogger
+from guardrail.autopilot import get_autopilot, AutopilotController
+from guardrail.monitoring import get_metrics, MetricsRegistry
 
 
 class ComplianceFramework(Enum):

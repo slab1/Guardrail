@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
 from enum import Enum
-from token_service import TokenPayload
+from guardrail.token_service import TokenPayload
 
 
 class PEPType(Enum):
@@ -54,7 +54,7 @@ class BasePEP(ABC):
     
     def validate_token(self, request: PEPRequest) -> bool:
         """Validate the step token."""
-        from plan_compiler.enhanced_plan_compiler import validate_step_token_for_execution
+        from guardrail.plan_compiler.enhanced_plan_compiler import validate_step_token_for_execution
         return validate_step_token_for_execution(
             request.plan_id,
             request.step_id,

@@ -1,0 +1,103 @@
+# Guardrail Helm Deployment Template
+# This file contains Helm template syntax that won't validate as plain YAML
+# See: https://helm.sh/docs/chart_template_guide/
+
+# Deployment template for Guardrail API
+# Full template available in deployment/helm/guardrail/templates/deployment.yaml
+# with proper Helm template syntax
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guardrail
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: guardrail
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.guardrail.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: guardrail
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: guardrail
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.guardrail.service.ports.metrics }}"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      securityContext:
+        runAsNonRoot: {{ .Values.guardrail.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.guardrail.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.guardrail.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.guardrail.securityContext.fsGroup }}
+      containers:
+        - name: guardrail
+          image: "{{ .Values.guardrail.image.repository }}:{{ .Values.guardrail.image.tag }}"
+          imagePullPolicy: {{ .Values.guardrail.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.guardrail.service.ports.http }}
+              name: http
+            - containerPort: {{ .Values.guardrail.service.ports.metrics }}
+              name: metrics
+          env:
+            - name: GUARDRAIL_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: guardrail-secrets
+                  key: secret-key
+            - name: GUARDRAIL_AUDIT_LOG_PATH
+              value: "/var/log/guardrail/audit.log"
+            - name: GUARDRAIL_LSFS_ROOT
+              value: "/var/lib/guardrail/lsfs"
+            - name: NVIDIA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: guardrail-secrets
+                  key: nvidia-api-key
+                  optional: true
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: audit-logs
+              mountPath: /var/log/guardrail
+            - name: lsfs-data
+              mountPath: /var/lib/guardrail/lsfs
+            - name: firecracker-data
+              mountPath: /tmp/guardrail_firecracker
+      volumes:
+        - name: audit-logs
+          persistentVolumeClaim:
+            claimName: guardrail-audit-logs
+        - name: lsfs-data
+          persistentVolumeClaim:
+            claimName: guardrail-lsfs
+        - name: firecracker-data
+          emptyDir:
+            sizeLimit: 1Gi

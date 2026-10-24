@@ -1,0 +1,152 @@
+# Guardrail Configuration
+# Copy to /etc/guardrail/config.yaml or set via environment variables
+
+app_name: "guardrail"
+environment: "development"
+debug: true
+log_level: "INFO"
+
+data_dir: "/var/guardrail"
+config_dir: "/etc/guardrail"
+log_dir: "/var/log/guardrail"
+
+mcp:
+  host: "0.0.0.0"
+  port: 9000
+  enable_tls: false
+  cert_path: null
+  key_path: null
+  max_connections: 100
+  request_timeout: 30
+
+plan_compiler:
+  enable_static_validation: true
+  enable_reversibility_check: true
+  max_plan_steps: 100
+  default_timeout: 300
+  allowed_models:
+    - "nvidia/nemotron-3-ultra-550b-a55b"
+    - "gpt-4"
+    - "claude-3"
+
+token_service:
+  secret_key: "CHANGE_THIS_IN_PRODUCTION_USE_STRONG_RANDOM_KEY"
+  algorithm: "HS256"
+  default_ttl: 3600
+  max_ttl: 86400
+  issuer: "guardrail"
+
+consent:
+  require_consent_for_risk:
+    - "medium"
+    - "high"
+    - "critical"
+  consent_ttl: 3600
+  auto_approve_low_risk: true
+  ui_callback_url: null
+
+pep:
+  fs_root: "/var/guardrail/fs"
+  fs_snapshot_interval: 300
+  fs_max_snapshots: 100
+  fs_enable_compression: true
+  
+  exec_kernel_path: "/var/guardrail/firecracker/vmlinux"
+  exec_rootfs_path: "/var/guardrail/firecracker/rootfs.ext4"
+  exec_cpu_count: 2
+  exec_memory_mb: 1024
+  exec_network_rate_limit: "100Mbps"
+  
+  net_default_policy: "deny"
+  net_allowed_domains:
+    - "api.github.com"
+    - "pypi.org"
+  net_tls_required: true
+  net_verify_certificates: true
+
+causal_audit:
+  log_path: "/var/guardrail/audit/causal.log"
+  max_log_size_mb: 1000
+  retention_days: 90
+  enable_hash_chain: true
+  hash_algorithm: "sha256"
+  enable_ebpf: false
+
+autopilot:
+  initial_trust_score: 0.0
+  trust_increment: 0.5
+  trust_decrement: 2.0
+  elevation_thresholds:
+    LOCKED: 0
+    RESTRICTED: 10
+    STANDARD: 50
+    ELEVATED: 100
+    AUTONOMOUS: 200
+  decay_rate: 0.01
+  max_history: 10000
+
+authzen:
+  pdp_endpoint: "http://localhost:8081"
+  spiffe_trust_domain: "guardrail.example.com"
+  spiffe_socket_path: "/var/run/spire/socket"
+  enable_workload_identity: true
+  cache_ttl: 300
+
+mesh:
+  node_id: "guardrail-node"
+  listen_address: "0.0.0.0:9000"
+  bootstrap_nodes: []
+  heartbeat_interval: 5
+  node_timeout: 30
+  enable_mtls: false
+  cert_path: null
+  key_path: null
+
+monitoring:
+  service_name: "guardrail"
+  otlp_endpoint: "http://localhost:4317"
+  prometheus_port: 9090
+  enable_prometheus: true
+  enable_otlp: true
+  log_level: "INFO"
+  trace_sample_rate: 0.1
+  metric_interval: 15
+
+compliance:
+  enable_ai_act: true
+  enable_nist_ai_rmf: true
+  enable_iso_42001: true
+  evidence_path: "/var/guardrail/compliance/evidence"
+  report_path: "/var/guardrail/compliance/reports"
+  audit_retention_days: 2555
+
+advanced_security:
+  hsm_type: "soft"
+  hsm_pkcs11_lib: null
+  hsm_slot: 0
+  hsm_pin: null
+  biometric_type: "fido2"
+  fido2_rp_id: "guardrail.example.com"
+  fido2_origin: "https://guardrail.example.com"
+  enable_continuous_auth: true
+  authzen_endpoint: "http://localhost:8082"
+
+disaster_recovery:
+  backup_path: "/var/guardrail/backup"
+  backup_interval: 3600
+  retention_days: 30
+  compression: true
+  encryption: true
+  replication_regions:
+    - "us-east-1"
+    - "us-west-2"
+    - "eu-west-1"
+  rpo_seconds: 300
+  rto_seconds: 3600
+
+integration_test:
+  mcp_server_url: null
+  langgraph_endpoint: null
+  nemotron_api_key: null
+  test_timeout: 60
+  parallel_tests: 4
