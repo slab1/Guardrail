@@ -43,8 +43,8 @@ def _parse_intent(intent: str) -> Dict[str, Any]:
     
     # Simple heuristic: split on verbs that are followed by nouns
     # This is a very naive approach; in production we'd use a proper parser.
-    # Capture the verb and the object
-    verbs = re.findall(r'\b(create|read|write|delete|list|download|upload|modify|execute|run|query|fetch|submit|review|approve|deny)\b\s+([^,\.\n]+)', intent, flags=re.IGNORECASE)
+    # Capture the verb and the object (including paths with spaces)
+    verbs = re.findall(r'\b(create|read|write|delete|list|download|upload|modify|execute|run|query|fetch|submit|review|approve|deny)\b\s+(.+)', intent, flags=re.IGNORECASE)
     
     actions = []
     for verb, obj in verbs:
