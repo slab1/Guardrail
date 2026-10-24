@@ -310,6 +310,7 @@ def create_safety_policy_set() -> PolicySet:
     user_consent = PolicyVariable("user_consent", "bool", "Whether user has given consent")
     risk_level = PolicyVariable("risk_level", "string", "Risk level of action")
     requires_admin = PolicyVariable("requires_admin", "bool", "Whether action requires admin")
+    action_taken = PolicyVariable("action_taken", "string", "Action performed")
     
     rules = [
         PolicyRule(
@@ -336,6 +337,63 @@ def create_safety_policy_set() -> PolicySet:
             priority=100,
             evidence_required=["user_consent_record"],
         ),
+        PolicyRule(
+            id="safety_002",
+            name="High Risk Actions Require Approval",
+            policy_type=PolicyType.SAFETY,
+            description="High risk actions need approval",
+            variables=[risk_level, user_consent],
+            precondition=None,
+            condition=PolicyExpression(
+                LogicalOperator.IMPLIES,
+                [
+                    PolicyCondition("risk_level", ComparisonOperator.EQ, "high"),
+                    PolicyCondition("user_consent", ComparisonOperator.EQ, True),
+                ]
+            ),
+            action="deny",
+            priority=90,
+            evidence_required=["approval_record"],
+        ),
+        PolicyRule(
+            id="safety_003",
+            name="Autonomy Level Enforcement",
+            policy_type=PolicyType.SAFETY,
+            description="Enforce autonomy level constraints",
+            variables=[autonomy_level, action_type],
+            precondition=None,
+            condition=PolicyExpression(
+                LogicalOperator.AND,
+                [
+                    PolicyCondition("autonomy_level", ComparisonOperator.LE, 1),
+                    PolicyCondition("action_type", ComparisonOperator.IN, ["file_delete", "system_modify"]),
+                ]
+            ),
+            action="deny",
+            priority=80,
+        ),
+        PolicyRule(
+            id="safety_004",
+            name="Path Traversal Prevention",
+            policy_type=PolicyType.SAFETY,
+            description="Prevent path traversal attacks",
+            variables=[resource_path],
+            precondition=None,
+            condition=PolicyCondition("resource_path", ComparisonOperator.MATCHES, r"\.\./.*"),
+            action="deny",
+            priority=95,
+        ),
+        PolicyRule(
+            id="safety_005",
+            name="Sensitive Path Protection",
+            policy_type=PolicyType.SAFETY,
+            description="Protect sensitive paths",
+            variables=[resource_path],
+            precondition=None,
+            condition=PolicyCondition("resource_path", ComparisonOperator.STARTS_WITH, "/etc/"),
+            action="deny",
+            priority=85,
+        ),
     ]
     
     return PolicySet(
@@ -353,8 +411,57 @@ def create_resource_policy_set() -> PolicySet:
     resource_size = PolicyVariable("resource_size", "int", "Size of resource in MB")
     autonomy_level = PolicyVariable("autonomy_level", "int", "Agent autonomy level")
     user_approval = PolicyVariable("user_approval", "bool", "User approval obtained")
+    cpu_usage = PolicyVariable("cpu_usage", "int", "CPU usage percentage")
+    memory_usage = PolicyVariable("memory_usage", "int", "Memory usage MB")
+    network_bytes = PolicyVariable("network_bytes", "int", "Network bytes per second")
+    execution_time = PolicyVariable("execution_time", "int", "Execution time seconds")
     
-    rules = []
+    rules = [
+        PolicyRule(
+            id="resource_001",
+            name="CPU Limit",
+            policy_type=PolicyType.RESOURCE,
+            description="Limit CPU usage",
+            variables=[cpu_usage],
+            precondition=None,
+            condition=PolicyCondition("cpu_usage", ComparisonOperator.LE, 80),
+            action="deny",
+            priority=70,
+        ),
+        PolicyRule(
+            id="resource_002",
+            name="Memory Limit",
+            policy_type=PolicyType.RESOURCE,
+            description="Limit memory usage",
+            variables=[memory_usage],
+            precondition=None,
+            condition=PolicyCondition("memory_usage", ComparisonOperator.LE, 1024),
+            action="deny",
+            priority=70,
+        ),
+        PolicyRule(
+            id="resource_003",
+            name="Network Rate Limit",
+            policy_type=PolicyType.RESOURCE,
+            description="Limit network bandwidth",
+            variables=[network_bytes],
+            precondition=None,
+            condition=PolicyCondition("network_bytes", ComparisonOperator.LE, 1000000),
+            action="deny",
+            priority=60,
+        ),
+        PolicyRule(
+            id="resource_004",
+            name="Execution Timeout",
+            policy_type=PolicyType.RESOURCE,
+            description="Limit execution time",
+            variables=[execution_time],
+            precondition=None,
+            condition=PolicyCondition("execution_time", ComparisonOperator.LE, 300),
+            action="deny",
+            priority=65,
+        ),
+    ]
     
     return PolicySet(
         id="guardrail_resource_v1",
@@ -373,7 +480,42 @@ def create_compliance_policy_set() -> PolicySet:
     is_high_risk_ai = PolicyVariable("is_high_risk_ai", "bool", "Whether system is high-risk AI")
     human_oversight = PolicyVariable("human_oversight", "bool", "Whether human oversight enabled")
     
-    rules = []
+    rules = [
+        PolicyRule(
+            id="compliance_001",
+            name="AI Act - High Risk AI",
+            policy_type=PolicyType.COMPLIANCE,
+            description="High risk AI requires human oversight",
+            variables=[is_high_risk_ai, human_oversight],
+            precondition=None,
+            condition=PolicyExpression(
+                LogicalOperator.IMPLIES,
+                [
+                    PolicyCondition("is_high_risk_ai", ComparisonOperator.EQ, True),
+                    PolicyCondition("human_oversight", ComparisonOperator.EQ, True),
+                ]
+            ),
+            action="deny",
+            priority=100,
+        ),
+        PolicyRule(
+            id="compliance_002",
+            name="GDPR - Special Category Data",
+            policy_type=PolicyType.COMPLIANCE,
+            description="Special category data requires DPIA",
+            variables=[data_category, has_dpia],
+            precondition=None,
+            condition=PolicyExpression(
+                LogicalOperator.IMPLIES,
+                [
+                    PolicyCondition("data_category", ComparisonOperator.IN, ["health", "biometric", "genetic"]),
+                    PolicyCondition("has_dpia", ComparisonOperator.EQ, True),
+                ]
+            ),
+            action="deny",
+            priority=100,
+        ),
+    ]
     
     return PolicySet(
         id="guardrail_compliance_v1",
