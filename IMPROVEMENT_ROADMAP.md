@@ -1,12 +1,12 @@
 # Guardrail Project Improvement Roadmap
 
-## Phase 1: Formal Verification Enhancements ✅ PARTIALLY COMPLETE
+## Phase 1: Formal Verification Enhancements ✅ COMPLETE
 
 **Status Summary:**
 - 1.1 Z3 Integration Improvements: ✅ COMPLETED
 - 1.2 Policy Language Features: ✅ COMPLETED
 - 1.3 Verification Performance: ✅ COMPLETED
-- 1.4 Policy Conflict Detection: 🔄 PENDING
+- 1.4 Policy Conflict Detection: ✅ COMPLETED
 
 ### 1.1 Z3 Integration Improvements ✅ COMPLETED
 - ✅ Fixed regex MATCHES operator - proper Z3 regex handling with graceful fallback
@@ -45,10 +45,11 @@
 - Add parallel verification for large policy sets
 - Create a caching mechanism for frequently verified policy sets
 
-### 1.4 Policy Conflict Detection
-- Enhance conflict detection to identify indirect conflicts
-- Add conflict visualization tools
-- Implement conflict resolution strategies
+### 1.4 Policy Conflict Detection ✅ COMPLETED
+- ✅ Implement indirect conflict detection (rule chains)
+- ✅ Add conflict visualization tools (graph-based)
+- ✅ Implement conflict resolution strategies (priority, specificity, merge)
+- ✅ Add conflict severity calculation and reporting
 
 ## Phase 2: Policy Language and Expression System
 
@@ -110,15 +111,8 @@
 
 ## Next Steps
 
-**Immediate Next Steps (Phase 1):**
-1. ✅ COMPLETED: Phase 1.1 Z3 Integration Improvements
-2. ✅ COMPLETED: Phase 1.2 Policy Language Features
-3. ✅ COMPLETED: Phase 1.3 Verification Performance
-4. 🔄 NEXT: Phase 1.4 Policy Conflict Detection (indirect conflicts, visualization)
+**Phase 1 Complete!** All formal verification enhancements implemented.
 
-1. Review current policy language limitations
-2. Prioritize features based on user needs
-3. Begin implementation of Phase 1 remaining items
-4. Establish testing criteria for each phase
-
-Let's start by examining the current policy language implementation and identifying the most critical areas for improvement.
+**Next Steps (Phase 2):**
+1. Phase 2.1 Policy Expression Parser (AST-based policy language)
+2. Phase 2.2 Policy Templates
