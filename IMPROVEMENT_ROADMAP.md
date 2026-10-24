@@ -53,10 +53,17 @@
 
 ## Phase 2: Policy Language and Expression System
 
-### 2.1 Policy Expression Parser
-- Develop a proper parser for the policy language instead of string-based construction
-- Implement a AST-based policy expression system
-- Add syntax highlighting and validation for policy files
+**Phase 2.1 Policy Expression Parser ✅ COMPLETED**
+- ✅ Implemented AST-based policy language parser with lexer and parser
+- ✅ Added syntax validation and error messages with line/column information
+- ✅ Implemented grammar for policy rules, conditions, actions
+- ✅ Added support for quantifiers (forall/exists) and temporal operators
+- ✅ Policy files can be parsed with proper error reporting
+
+### 2.1 Policy Expression Parser ✅ COMPLETED
+- ✅ Develop a proper parser for the policy language instead of string-based construction
+- ✅ Implement a AST-based policy expression system
+- ✅ Add syntax highlighting and validation for policy files
 
 ### 2.2 Policy Templates
 - Create reusable policy templates for common patterns
@@ -113,6 +120,8 @@
 
 **Phase 1 Complete!** All formal verification enhancements implemented.
 
+**Phase 2.1 Complete!** Policy Expression Parser implemented.
+
 **Next Steps (Phase 2):**
-1. Phase 2.1 Policy Expression Parser (AST-based policy language)
-2. Phase 2.2 Policy Templates
+1. ✅ Phase 2.1 Policy Expression Parser COMPLETED
+2. Phase 2.2 Policy Templates (next)
