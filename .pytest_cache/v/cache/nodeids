@@ -1,0 +1,10 @@
+[
+  "tests/test_data_plane_pep.py::test_data_plane_pep_forgery_signature_mismatch",
+  "tests/test_data_plane_pep.py::test_data_plane_pep_happy_path",
+  "tests/test_data_plane_pep.py::test_data_plane_pep_linear_token_replay_blocked",
+  "tests/test_data_plane_pep.py::test_data_plane_pep_resource_escapement",
+  "tests/test_data_plane_pep.py::test_data_plane_pep_token_expiry",
+  "tests/test_verifier_properties.py::test_cache_performance",
+  "tests/test_verifier_properties.py::test_file_read_policy",
+  "tests/test_verifier_properties.py::test_resource_boundary_cases"
+]

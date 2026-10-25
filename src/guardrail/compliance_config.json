@@ -1,0 +1,57 @@
+{
+  "EU_AI_ACT": {
+    "title": "EU AI Act (2026)",
+    "requirements": [
+      {
+        "id": "ART_14",
+        "title": "Human Oversight",
+        "description": "High-risk AI systems shall be designed and developed in such a way that they can be effectively overseen by natural persons.",
+        "guardrail_mapping": "ConsentManager / HITL Loop",
+        "evidence_type": "CONSENT_DECIDED"
+      },
+      {
+        "id": "ART_15",
+        "title": "Accuracy, Robustness and Cybersecurity",
+        "description": "High-risk AI systems shall be designed to achieve an appropriate level of accuracy, robustness and cybersecurity.",
+        "guardrail_mapping": "FormalVerifier / Logic Invariants",
+        "evidence_type": "PLAN_VALIDATED"
+      }
+    ]
+  },
+  "NIST_AI_RMF": {
+    "title": "NIST AI Risk Management Framework",
+    "requirements": [
+      {
+        "id": "GOVERN_2.1",
+        "title": "Risk Management Governance",
+        "description": "Roles and responsibilities of personnel involved in the design, development, and use of AI systems are documented.",
+        "guardrail_mapping": "CausalAudit / Attribution",
+        "evidence_type": "PEP_INTERCEPTED"
+      }
+    ]
+  },
+  "ISO_42001": {
+    "title": "ISO/IEC 42001 (AI MS)",
+    "requirements": [
+      {
+        "id": "A.8.2",
+        "title": "AI System Life Cycle",
+        "description": "Establish and maintain a record of the AI system life cycle for traceability.",
+        "guardrail_mapping": "CausalAudit / Hash-Chain Trace",
+        "evidence_type": "AUDIT_LOG_EXPORT"
+      }
+    ]
+  },
+  "SOC2_TYPE_II": {
+    "title": "SOC 2 Type II (Security)",
+    "requirements": [
+      {
+        "id": "CC6.1",
+        "title": "Logical Access",
+        "description": "The entity restricts logical access to confidential information and assets to authorized users.",
+        "guardrail_mapping": "FormalVerifier / RBAC Kernels",
+        "evidence_type": "PEP_INTERCEPTED"
+      }
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // 2. Test Connection Collection for Healthchecks
+    match /test/{docId} {
+      allow get: if true;
+      allow write: if isSignedIn();
+    }
+
+    // 3. Audit Logs: Read & Write for signed-in users with schema validation
+    match /audit_logs/{eventId} {
+      allow get: if isSignedIn() && isValidId(eventId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(eventId) &&
+                      incoming().type is string &&
+                      incoming().type.size() <= 64 &&
+                      incoming().timestamp is number;
+    }
+
+    // 4. Active Plans: Users can read/write their own execution plans
+    match /active_plans/{planId} {
+      allow get: if isSignedIn() && isValidId(planId) && resource.data.user_id == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.user_id == request.auth.uid;
+      
+      allow create: if isSignedIn() && isValidId(planId) && 
+                      incoming().user_id == request.auth.uid &&
+                      incoming().status in ['pending_consent', 'pending_semantic'];
+                      
+      allow update: if isSignedIn() && isValidId(planId) &&
+                      incoming().user_id == existing().user_id &&
+                      incoming().user_id == request.auth.uid && (
+                        (incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+                         existing().status in ['pending_consent', 'pending_semantic'] &&
+                         incoming().status in ['authorized', 'blocked'])
+                      );
+    }
+  }
+}

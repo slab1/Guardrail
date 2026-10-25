@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+z3-solver
+jinja2
+python-multipart
+pydantic
+python-dotenv
+google-generativeai

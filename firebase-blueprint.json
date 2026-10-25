@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "AuditEvent": {
+      "title": "Audit Event",
+      "description": "A record of a kernel safety enforcement event.",
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "number", "description": "Unix timestamp" },
+        "type": { "type": "string", "description": "Event type (e.g. INTENT_PROCESSED)" },
+        "intent": { "type": "string", "description": "User intent string" },
+        "guard_verdict": { "type": "boolean", "description": "Semantic safety verdict" },
+        "logic_verdict": { "type": "boolean", "description": "Logic invariant verdict" },
+        "trust_score": { "type": "number", "description": "Calculated trust index" },
+        "latency_ms": { "type": "number", "description": "PEP latency" },
+        "speculative": { "type": "boolean", "description": "Whether the check was speculative" }
+      },
+      "required": ["timestamp", "type", "intent", "guard_verdict", "logic_verdict", "trust_score", "latency_ms"]
+    },
+    "ActivePlan": {
+      "title": "Active Plan",
+      "description": "An agent execution plan awaiting authorization or executing.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "intent": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending_consent", "pending_semantic", "authorized", "blocked", "executing"] },
+        "steps": { "type": "array", "description": "JSON serialized steps" },
+        "validation_errors": { "type": "array" },
+        "user_id": { "type": "string" }
+      },
+      "required": ["id", "intent", "status", "user_id"]
+    }
+  },
+  "firestore": {
+    "/audit_logs/{eventId}": {
+      "schema": "AuditEvent",
+      "description": "Global kernel audit trail"
+    },
+    "/active_plans/{planId}": {
+      "schema": "ActivePlan",
+      "description": "Stateful agent execution plans"
+    }
+  }
+}
