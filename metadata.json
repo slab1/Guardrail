@@ -1,0 +1,8 @@
+{
+  "name": "Guardrail",
+  "description": "The authorization and safety layer for intelligent AI agents with intent-bound per-step capabilities, graduated autonomy ladder, PEP enforcement, causal audit, and autopilot trust scoring.",
+  "version": "1.0.0",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
