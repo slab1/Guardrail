@@ -1,7 +1,7 @@
 # =========================================================
 # Stage 1: Build Frontend Static Assets (Vite + React)
 # =========================================================
-FROM node:20-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./

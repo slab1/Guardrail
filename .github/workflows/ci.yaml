@@ -106,30 +106,37 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Install Kernel Requirements
-        run: pip install -r requirements.txt uvicorn
+      - name: Build and Start Services
+        run: docker compose up -d --build
 
-      - name: Start FastAPI Background Kernel & Probe Endpoints
+      - name: Wait for Kernel Health Check
         run: |
-          PYTHONPATH=src uvicorn app:app --host 127.0.0.1 --port 8888 &
-          PID=$!
-          sleep 3
-          python3 -c "
-          import urllib.request, json
-          res = urllib.request.urlopen('http://127.0.0.1:8888/api/kernel/state')
-          data = json.loads(res.read().decode())
-          assert data.get('trust_score') == 100.0
-          print('Integration Probe Success: Kernel state online.')
-          "
-          kill $PID
+          for i in {1..10}; do
+            if docker inspect --format='{{json .State.Health.Status}}' guardrail-os-kernel | grep -q "healthy"; then
+              echo "Kernel is healthy!"
+              exit 0
+            fi
+            echo "Waiting for kernel health check... ($i/10)"
+            sleep 5
+          done
+          echo "Kernel failed to become healthy"
+          docker compose logs
+          exit 1
+
+      - name: Probe Kernel State Endpoint
+        run: |
+          curl -f http://localhost:8888/api/kernel/state | grep -q "trust_score"
+          echo "Integration Probe Success: Kernel responding correctly."
 
       - name: Validate Firestore Rules Presence
         run: |
           test -f "firestore.rules"
           test -f "firebase-blueprint.json"
           echo "Firestore security rules verified."
+
+      - name: Shutdown Services
+        if: always()
+        run: docker compose down
