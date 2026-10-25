@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guardrail-api
+  namespace: guardrail
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+        - name: guardrail-api
+          resources:
+            requests:
+              cpu: "1000m"
+              memory: "1Gi"
+            limits:
+              cpu: "4000m"
+              memory: "4Gi"
