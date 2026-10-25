@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  guardrail-kernel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: guardrail-os-kernel:latest
+    container_name: guardrail-os-kernel
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    environment:
+      - PORT=8888
+      - ENVIRONMENT=production
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/api/kernel/state"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
