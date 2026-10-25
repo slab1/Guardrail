@@ -76,9 +76,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
 
-      - name: Node Security Audit (Strict)
-        run: npm audit --audit-level=high
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Node Security Audit (Critical Severity Gate)
+        run: npm audit --audit-level=critical
 
       - name: Setup Python 3.10
         uses: actions/setup-python@v5
@@ -86,10 +90,10 @@ jobs:
           python-version: '3.10'
 
       - name: Install Bandit SAST Scanner
-        run: pip install bandit
+        run: python -m pip install bandit
 
       - name: Run Bandit SAST Scan (Strict)
-        run: bandit -r src/ -ll -ii
+        run: python -m bandit -r src/ -ll -ii
 
   # ---------------------------------------------------------------
   # Job 4: Integration Probes & Security Rules Integrity

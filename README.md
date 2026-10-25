@@ -96,10 +96,24 @@
 
 ---
 
+## Production Integration Blueprints
+
+Guardrail OS is built for real production applications. See our complete [Real Production Integration Record (PRODUCTION_INTEGRATIONS.md)](PRODUCTION_INTEGRATIONS.md) for architecture patterns, deployment topologies, and code blueprints:
+
+1. **Autonomous AI Coding Agents**: Subprocess execution gating and shell command interception (<0.02ms PEP fast-path).
+2. **Financial Transactions & Ledger Pipelines**: Z3 SMT formal proofs of double-entry invariants, transfer caps, and daily limit safety.
+3. **Healthcare EHR & HIPAA AI Copilots**: Zero-trust PHI token binding and RAG injection sanitization.
+4. **Kubernetes eBPF Container Enforcer**: Cluster-wide Seccomp `SIGSYS` syscall filtering via worker node DaemonSets.
+5. **Robotics & ROS2 Control Loops**: Sub-millisecond kinematic trajectory interlocks and hardware trap halts.
+
+---
+
 ## Documentation
 
-For full operational playbooks, troubleshooting, and API specifications, consult the [Guardrail OS Operational User Manual](USER_MANUAL.md).
+- 📘 **[Real Production Integrations Guide](PRODUCTION_INTEGRATIONS.md)** — Architectural integration patterns & code blueprints.
+- 📕 **[Guardrail OS User Manual](USER_MANUAL.md)** — Comprehensive operational handbook, playbooks, and API specs.
 
 ---
 
 *Guardrail OS Kernel v2.4 • Sub-10ms Non-Bypassable PEP Standard*
+
