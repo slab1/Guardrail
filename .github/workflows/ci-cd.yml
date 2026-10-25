@@ -17,10 +17,10 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js Latest (22.x)
+      - name: Setup Node.js Latest
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 'latest'
           cache: 'npm'
 
       - name: Install Node Dependencies
@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.10', '3.11']
+        python-version: ['3.10', '3.11', '3.12']
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
@@ -69,10 +69,10 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js Latest (22.x)
+      - name: Setup Node.js Latest
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 'latest'
           cache: 'npm'
 
       - name: Install Node Dependencies

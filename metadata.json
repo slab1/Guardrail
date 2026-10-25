@@ -1,5 +1,5 @@
 {
-  "name": "Guardrail AI Safety Layer",
+  "name": "Guardrail OS",
   "description": "An authorization and safety layer for intelligent operating systems, featuring formal verification, intent-bound tokens, and graduated autonomy.",
   "permissions": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

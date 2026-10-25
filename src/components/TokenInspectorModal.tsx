@@ -67,7 +67,9 @@ export const TokenInspectorModal: React.FC<TokenInspectorModalProps> = ({
   if (tokenString.trim().startsWith("{")) {
     try {
       rawCapToken = JSON.parse(tokenString);
-    } catch {}
+    } catch (e) {
+      console.debug("Capability token is not a valid JSON string, attempting JWT decode.");
+    }
   }
   const payload: TokenPayload | null = rawCapToken ? null : defaultTokenService.decodeToken(tokenString);
 

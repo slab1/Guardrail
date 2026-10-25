@@ -18,10 +18,10 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js Latest (22.x)
+      - name: Setup Node.js Latest
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 'latest'
           cache: 'npm'
 
       - name: Install Node Dependencies
@@ -72,10 +72,10 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js Latest (22.x)
+      - name: Setup Node.js Latest
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 'latest'
           cache: 'npm'
 
       - name: Install Node Dependencies
@@ -114,16 +114,29 @@ jobs:
 
       - name: Wait for Kernel Health Check
         run: |
-          for i in {1..10}; do
-            if docker inspect --format='{{json .State.Health.Status}}' guardrail-os-kernel | grep -q "healthy"; then
-              echo "Kernel is healthy!"
+          echo "Checking container availability..."
+          docker compose ps
+          
+          for i in {1..20}; do
+            STATUS=$(docker inspect --format='{{json .State.Health.Status}}' guardrail-os-kernel 2>/dev/null || echo "unstarted")
+            echo "Current status of guardrail-os-kernel: $STATUS ($i/20)"
+            
+            if [ "$STATUS" == "\"healthy\"" ]; then
+              echo "✔ Kernel is healthy!"
               exit 0
             fi
-            echo "Waiting for kernel health check... ($i/10)"
+            
+            if [ "$STATUS" == "\"unhealthy\"" ]; then
+              echo "✘ Kernel reported unhealthy status"
+              docker compose logs guardrail-kernel
+              exit 1
+            fi
+            
             sleep 5
           done
-          echo "Kernel failed to become healthy"
-          docker compose logs
+          
+          echo "TIMEOUT: Kernel failed to become healthy within allocated time."
+          docker compose logs guardrail-kernel
           exit 1
 
       - name: Probe Kernel State Endpoint
