@@ -53,7 +53,7 @@ export const DualTierArchView: React.FC = () => {
   // Simulator state
   const [testAction, setTestAction] = useState<string>("file_write");
   const [testResource, setTestResource] = useState<string>("/workspace/model_weights.bin");
-  const [simScenario, setSimScenario] = useState<"VALID" | "FORGERY" | "REPLAY" | "ESCAPEMENT" | "ILLEGAL_SYSCALL">("VALID");
+  const [simScenario, setSimScenario] = useState<"VALID" | "FORGERY" | "REPLAY" | "ESCAPEMENT" | "ILLEGAL_SYSCALL" | "ATTACK_EXECVE" | "ATTACK_SOCKET" | "ATTACK_PRIV">("VALID");
   const [simResult, setSimResult] = useState<any>(null);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
 
@@ -97,7 +97,22 @@ export const DualTierArchView: React.FC = () => {
     setSimResult(null);
 
     try {
-      if (simScenario === "ILLEGAL_SYSCALL") {
+      if (simScenario.startsWith("ATTACK_")) {
+        const vec = simScenario === "ATTACK_EXECVE" 
+          ? "execve_shell" 
+          : simScenario === "ATTACK_SOCKET" 
+            ? "unauthorized_socket" 
+            : "privilege_escalation";
+
+        const res = await fetch("/api/pep/attack-inject", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ vector: vec })
+        });
+        const data = await res.json();
+        setSimResult(data);
+        fetchMetrics();
+      } else if (simScenario === "ILLEGAL_SYSCALL") {
         const res = await fetch("/api/pep/simulate-trap", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -406,6 +421,9 @@ export const DualTierArchView: React.FC = () => {
                 <option value="REPLAY">3. Replay Attack (Reusing Consumed Nonce)</option>
                 <option value="ESCAPEMENT">4. Resource Escapement (Accessing /etc/shadow)</option>
                 <option value="ILLEGAL_SYSCALL">5. Unauthorized Syscall Trap (reboot() via SIGSYS)</option>
+                <option value="ATTACK_EXECVE">6. [ATTACK LAB] Rogue Shell Injection (execve /bin/sh)</option>
+                <option value="ATTACK_SOCKET">7. [ATTACK LAB] Raw TCP Egress Exfiltration (AF_INET RAW)</option>
+                <option value="ATTACK_PRIV">8. [ATTACK LAB] Root Privilege Escalation (setuid 0)</option>
               </select>
             </div>
 
@@ -493,22 +511,35 @@ export const DualTierArchView: React.FC = () => {
                   <span className="text-slate-500">Enforcement Tier:</span>
                   <span className="text-emerald-400 font-bold">{simResult.tier || "Tier-2 Data Plane"}</span>
                 </div>
-                {simResult.syscall_trap && (
+                {simResult.signal && (
                   <div className="flex justify-between">
                     <span className="text-slate-500">Hardware Syscall Signal:</span>
-                    <span className="text-rose-400 font-bold">{simResult.syscall_trap} (Interception Trap)</span>
+                    <span className="text-rose-400 font-bold">{simResult.signal}</span>
                   </div>
                 )}
-                {simResult.token_id && (
+                {simResult.seccomp_rule_matched && (
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Bound Token ID:</span>
-                    <span className="text-blue-400">{simResult.token_id}</span>
+                    <span className="text-slate-500">Seccomp Filter Rule:</span>
+                    <span className="text-amber-400 font-semibold">{simResult.seccomp_rule_matched}</span>
                   </div>
                 )}
-                {simResult.trap_type && (
+                {simResult.ebpf_ring_buffer_event && (
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Trap Type:</span>
-                    <span className="text-rose-400">{simResult.trap_type}</span>
+                    <span className="text-slate-500">eBPF Ring Buffer Event:</span>
+                    <span className="text-blue-400 font-bold">{simResult.ebpf_ring_buffer_event}</span>
+                  </div>
+                )}
+                {simResult.registers && (
+                  <div className="mt-2 pt-2 border-t border-slate-800/80 space-y-1">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase block">Kernel Trap Register Dump:</span>
+                    <div className="grid grid-cols-2 gap-1 text-[10px] text-emerald-400 bg-slate-950 p-2 rounded border border-slate-800">
+                      {Object.entries(simResult.registers).map(([k, v]: [string, any]) => (
+                        <div key={k} className="flex justify-between">
+                          <span className="text-slate-500">{k}:</span>
+                          <span>{v}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

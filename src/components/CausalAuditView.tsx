@@ -199,8 +199,8 @@ export const CausalAuditView: React.FC = () => {
                         <span className="text-slate-300">
                           {new Date(log.timestamp * 1000).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}.{Math.floor((log.timestamp % 1) * 1000).toString().padStart(3, '0')}
                         </span>
-                        <span className="text-[9px] text-slate-600 uppercase tracking-tighter mt-0.5">
-                          TRC-{Math.random().toString(36).substring(7).toUpperCase()}
+                        <span className="text-[9px] text-slate-600 uppercase tracking-tighter mt-0.5 font-mono">
+                          TRC-{Math.floor((log.timestamp || 0) * 1000).toString(16).toUpperCase()}
                         </span>
                       </div>
                     </td>

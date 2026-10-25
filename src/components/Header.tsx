@@ -15,7 +15,9 @@ import {
   User as UserIcon,
   CheckCircle2,
   AlertCircle,
-  Zap
+  Zap,
+  AlertOctagon,
+  Users
 } from "lucide-react";
 import { User } from "firebase/auth";
 
@@ -43,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
   const tabs = [
     { id: "studio", label: "Intent Studio", icon: Terminal },
     { id: "dualtier", label: "Dual-Tier Arch", icon: Zap },
+    { id: "incidents", label: "Agent ACLs & Kill-Switch", icon: AlertOctagon },
     { id: "pep", label: "PEP Fleet", icon: Layers },
     { id: "authzen", label: "AuthZEN / SPIFFE", icon: Lock },
     { id: "autopilot", label: "Autopilot", icon: Cpu },

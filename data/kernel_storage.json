@@ -91,6 +91,16 @@
       "latency_ms": 186.2260329999117,
       "speculative": false,
       "tier2_tokens_issued": true
+    },
+    {
+      "timestamp": 1792922824.637299,
+      "type": "SYSCALL_ATTACK_TRAPPED",
+      "intent": "Attack Vector Injected: execve_shell (execve)",
+      "guard_verdict": false,
+      "logic_verdict": false,
+      "trust_score": 100.0,
+      "latency_ms": 0.041,
+      "speculative": false
     }
   ],
   "active_plans": {
@@ -262,5 +272,6 @@
       "validation_errors": [],
       "created_at": 1792921887.0873868
     }
-  }
+  },
+  "custom_templates": []
 }

@@ -60,7 +60,7 @@ export const ConsentView: React.FC<ConsentViewProps> = ({
     }));
   };
 
-  const handleApprovePlan = () => {
+  const handleApprovePlan = async () => {
     if (!currentPlan) return;
     defaultConsentManager.recordDecision(
       currentPlan.id,
@@ -69,11 +69,24 @@ export const ConsentView: React.FC<ConsentViewProps> = ({
       "human_operator",
       "Explicit operator approval recorded via Guardrail Consent Console."
     );
+    try {
+      await fetch("/api/consent/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan_id: currentPlan.id,
+          approved: true,
+          step_approvals: stepApprovals
+        })
+      });
+    } catch (err) {
+      console.error("Consent decision error:", err);
+    }
     setConsentGranted(true);
-    setDecisionMessage("Plan capabilities approved for execution.");
+    setDecisionMessage("Plan capabilities approved for execution and persisted to kernel.");
   };
 
-  const handleDenyPlan = () => {
+  const handleDenyPlan = async () => {
     if (!currentPlan) return;
     defaultConsentManager.recordDecision(
       currentPlan.id,
@@ -82,6 +95,19 @@ export const ConsentView: React.FC<ConsentViewProps> = ({
       "human_operator",
       "Plan denied by operator review."
     );
+    try {
+      await fetch("/api/consent/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan_id: currentPlan.id,
+          approved: false,
+          step_approvals: {}
+        })
+      });
+    } catch (err) {
+      console.error("Consent denial error:", err);
+    }
     setConsentGranted(false);
     setDecisionMessage("Plan denied: tokens will be rejected at the PEP gateway.");
   };

@@ -8,6 +8,7 @@ import { PepFleetView } from "./components/PepFleetView";
 import { AuthZENView } from "./components/AuthZENView";
 import { ConsentView } from "./components/ConsentView";
 import { DualTierArchView } from "./components/DualTierArchView";
+import { IncidentAndTenantsView } from "./components/IncidentAndTenantsView";
 import { ExplainDenyModal } from "./components/ExplainDenyModal";
 import { TokenInspectorModal } from "./components/TokenInspectorModal";
 import { AutonomyLevel, ValidatedPlan } from "./types/guardrail";
@@ -219,6 +220,11 @@ export const App: React.FC = () => {
         )}
         {activeTab === "dualtier" && (
           <DualTierArchView />
+        )}
+        {activeTab === "incidents" && (
+          <IncidentAndTenantsView 
+            onAgentSwitched={(agentId, level) => handleSetAutonomy(level)}
+          />
         )}
         {activeTab === "pep" && (
           <PepFleetView 
