@@ -101,6 +101,31 @@
       "trust_score": 100.0,
       "latency_ms": 0.041,
       "speculative": false
+    },
+    {
+      "timestamp": 1793027174.5929835,
+      "type": "INTENT_PROCESSED",
+      "intent": "Read /workspace/README.md and check settings",
+      "details": {
+        "intent": "Read /workspace/README.md and check settings",
+        "guard_verdict": true,
+        "logic_verdict": true,
+        "trust_score": 100.0,
+        "latency_ms": 189.4102810001641,
+        "speculative": false,
+        "tier2_tokens_issued": true,
+        "plan_hash": "05c70a128731d2da2125b20cd870e735ca66533d7d1aeaba31fdbc5a346ad869",
+        "tenant_id": "tenant-secops",
+        "user_id": "secops_admin"
+      },
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "6fb0be5f9aaf743e46cf87739a86f461af6070c7f4ce9ecb05c075262942f5e8",
+      "guard_verdict": true,
+      "logic_verdict": true,
+      "trust_score": 100.0,
+      "latency_ms": 189.4102810001641,
+      "speculative": false,
+      "approver": null
     }
   ],
   "active_plans": {
@@ -271,6 +296,39 @@
       ],
       "validation_errors": [],
       "created_at": 1792921887.0873868
+    },
+    "plan_d39ba232": {
+      "id": "plan_d39ba232",
+      "intent": "Read /workspace/README.md and check settings",
+      "description": "Generated Plan for intent: Read /workspace/README.md and check settings",
+      "status": "pending_consent",
+      "user_id": "secops_admin",
+      "tenant_id": "tenant-secops",
+      "steps": [
+        {
+          "id": "step_1",
+          "description": "Read file",
+          "action": "file_read",
+          "resource": "/workspace/README.md",
+          "risk": "low",
+          "capability_token": {
+            "token_id": "tok_aec3a289c4cb",
+            "plan_id": "plan_d39ba232",
+            "step_id": "step_1",
+            "action_type": "file_read",
+            "resource": "/workspace/README.md",
+            "autonomy_level": 1,
+            "issued_at": 1793027174.5926702,
+            "expires_at": 1793027234.5926702,
+            "nonce": "eea331385cef45719812d14755763501",
+            "kid": "v1",
+            "signature": "236694c06a50eb6fd7a0c12d8eb61b8e7f7af1246e77a42e5f9b7edd0fc6e107"
+          }
+        }
+      ],
+      "validation_errors": [],
+      "created_at": 1793027174.5929742,
+      "plan_hash": "05c70a128731d2da2125b20cd870e735ca66533d7d1aeaba31fdbc5a346ad869"
     }
   },
   "custom_templates": []

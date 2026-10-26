@@ -8,6 +8,14 @@ class PlanStep:
         self.action_type = action_type
         self.resource = resource
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "description": self.description,
+            "action_type": self.action_type,
+            "resource": self.resource
+        }
+
 class AgentPlan:
     def __init__(self, intent: str, agent_class: str, user_id: str):
         self.id = f"plan_{uuid.uuid4().hex[:8]}"
@@ -18,6 +26,18 @@ class AgentPlan:
         self.steps: List[PlanStep] = []
         self.validation_errors: List[str] = []
         self.consent_required: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "intent": self.intent,
+            "description": self.description,
+            "agent_class": self.agent_class,
+            "user_id": self.user_id,
+            "steps": [s.to_dict() if hasattr(s, "to_dict") else str(s) for s in self.steps],
+            "validation_errors": self.validation_errors,
+            "consent_required": self.consent_required
+        }
 
 class AgentResult:
     def __init__(self, success: bool, message: str, data: Any = None):

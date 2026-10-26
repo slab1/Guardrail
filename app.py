@@ -41,16 +41,34 @@ def append_to_audit_ledger(entry: Dict[str, Any]):
     except Exception as e:
         print(f"[!] Warning: Could not write to audit ledger: {e}")
 
+def json_default_serializer(obj):
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    if hasattr(obj, "__dict__"):
+        return {k: v for k, v in obj.__dict__.items() if not k.startswith("_")}
+    return str(obj)
+
 def save_storage(logs, plans, templates=None):
     try:
+        clean_plans = {}
+        for pid, pdata in plans.items():
+            if isinstance(pdata, dict):
+                clean_plans[pid] = pdata
+            elif hasattr(pdata, "to_dict"):
+                clean_plans[pid] = pdata.to_dict()
+            elif hasattr(pdata, "__dict__"):
+                clean_plans[pid] = {k: v for k, v in pdata.__dict__.items() if not k.startswith("_")}
+            else:
+                clean_plans[pid] = str(pdata)
+
         data = {
             "audit_logs": logs[-1000:],  # retain recent 1000 in memory cache
-            "active_plans": plans,
+            "active_plans": clean_plans,
             "custom_templates": templates if templates is not None else _stored.get("custom_templates", [])
         }
         temp_file = STORAGE_FILE + ".tmp"
         with open(temp_file, "w") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=2, default=json_default_serializer)
         os.replace(temp_file, STORAGE_FILE)
     except Exception as e:
         print(f"[!] Error saving storage: {e}")
@@ -208,7 +226,6 @@ async def submit_intent(request: IntentRequest, principal: Principal = Depends(g
     
     # Tier 2: Agent Plan Creation
     plan = agent.create_plan(request.intent)
-    active_plans[plan.id] = plan
     
     # Tier 3: Logic Verification (SMT) with Canonical Boundary Checking
     verifier = create_verifier()
@@ -289,6 +306,19 @@ async def submit_intent(request: IntentRequest, principal: Principal = Depends(g
     consent_req = consent_mgr.request_consent(plan, user_id=user_id, tenant_id=tenant_id)
     consent_req.plan_hash = plan_hash
 
+    active_plans[plan.id] = {
+        "id": plan.id,
+        "intent": plan.intent,
+        "description": plan.description,
+        "status": status_str,
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "steps": steps_payload,
+        "validation_errors": plan.validation_errors,
+        "created_at": time.time(),
+        "plan_hash": plan_hash
+    }
+
     # Record Tamper-Evident Audit Event
     audit_details = {
         "intent": request.intent,
@@ -303,19 +333,6 @@ async def submit_intent(request: IntentRequest, principal: Principal = Depends(g
         "user_id": user_id
     }
     create_tamper_evident_audit_entry("INTENT_PROCESSED", request.intent, audit_details)
-
-    active_plans[plan.id] = {
-        "id": plan.id,
-        "intent": plan.intent,
-        "description": plan.description,
-        "status": status_str,
-        "user_id": user_id,
-        "tenant_id": tenant_id,
-        "steps": steps_payload,
-        "validation_errors": plan.validation_errors,
-        "created_at": time.time(),
-        "plan_hash": plan_hash
-    }
     save_storage(audit_logs, active_plans)
     
     return {
