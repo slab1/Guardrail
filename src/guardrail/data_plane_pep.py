@@ -166,6 +166,7 @@ class DurableNonceStore:
                     );
                 """)
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_expires ON consumed_nonces(expires_at);")
+                conn.execute("PRAGMA journal_size_limit=1048576;")
                 conn.commit()
                 
                 # Preload active nonces into hot cache
@@ -196,12 +197,16 @@ class DurableNonceStore:
                 return False
 
             try:
-                with sqlite3.connect(self.db_path, timeout=5.0) as conn:
-                    conn.execute(
-                        "INSERT INTO consumed_nonces (nonce, token_id, plan_id, consumed_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-                        (nonce, token_id, plan_id, now, expires_at)
-                    )
-                    conn.commit()
+                # Use a single connection per consume for better latency
+                conn = sqlite3.connect(self.db_path, timeout=1.0)
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA synchronous=NORMAL;")
+                conn.execute(
+                    "INSERT INTO consumed_nonces (nonce, token_id, plan_id, consumed_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+                    (nonce, token_id, plan_id, now, expires_at)
+                )
+                conn.commit()
+                conn.close()
                 self._hot_cache.add(nonce)
                 return True
             except sqlite3.IntegrityError:
