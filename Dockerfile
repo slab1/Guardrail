@@ -9,6 +9,7 @@ RUN npm ci
 
 COPY tsconfig.json tsconfig.node.json vite.config.ts postcss.config.js tailwind.config.js index.html ./
 COPY src ./src
+COPY firebase-applet-config.json ./
 
 RUN npm run build
 
