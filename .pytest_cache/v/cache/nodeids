@@ -1,9 +1,13 @@
 [
+  "tests/test_data_plane_pep.py::test_canonical_resource_boundary_validation",
   "tests/test_data_plane_pep.py::test_data_plane_pep_forgery_signature_mismatch",
+  "tests/test_data_plane_pep.py::test_data_plane_pep_future_clock_skew_rejected",
   "tests/test_data_plane_pep.py::test_data_plane_pep_happy_path",
   "tests/test_data_plane_pep.py::test_data_plane_pep_linear_token_replay_blocked",
   "tests/test_data_plane_pep.py::test_data_plane_pep_resource_escapement",
+  "tests/test_data_plane_pep.py::test_data_plane_pep_tampered_payload_rejected",
   "tests/test_data_plane_pep.py::test_data_plane_pep_token_expiry",
+  "tests/test_data_plane_pep.py::test_data_plane_pep_unsigned_token_rejected",
   "tests/test_verifier_properties.py::test_cache_performance",
   "tests/test_verifier_properties.py::test_file_read_policy",
   "tests/test_verifier_properties.py::test_resource_boundary_cases"

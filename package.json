@@ -4,10 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"export PYTHONPATH=$PYTHONPATH:/root/.local/lib/python3.10/site-packages && /root/.local/bin/uvicorn app:app --host 0.0.0.0 --port 8888 --reload\" \"vite\"",
+    "dev": "concurrently \"python3 -m uvicorn app:app --host 0.0.0.0 --port 8888 --reload\" \"vite\"",
     "build": "tsc && vite build",
     "lint": "eslint .",
-    "start": "concurrently \"export PYTHONPATH=$PYTHONPATH:/root/.local/lib/python3.10/site-packages && /root/.local/bin/uvicorn app:app --host 0.0.0.0 --port 8888\" \"vite\"",
+    "start": "concurrently \"python3 -m uvicorn app:app --host 0.0.0.0 --port 8888\" \"vite\"",
     "preview": "vite preview"
   },
   "dependencies": {

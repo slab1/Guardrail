@@ -6,11 +6,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Global Helpers
+    // Global Hardened Helper Primitives
     function isSignedIn() {
       return request.auth != null;
     }
-    
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -19,38 +19,82 @@ service cloud.firestore {
       return request.resource.data;
     }
 
-    // 2. Test Connection Collection for Healthchecks
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Entity Validation Blueprint: AuditEvent
+    function isValidAuditEvent(data) {
+      return data.keys().hasAll(['timestamp', 'type', 'intent', 'guard_verdict', 'logic_verdict', 'trust_score', 'latency_ms', 'user_id']) &&
+             data.keys().hasOnly(['timestamp', 'type', 'intent', 'guard_verdict', 'logic_verdict', 'trust_score', 'latency_ms', 'user_id', 'tenant_id', 'speculative', 'details', 'prev_hash', 'hash', 'approver']) &&
+             data.timestamp is number &&
+             data.type is string && data.type.size() <= 64 &&
+             data.intent is string && data.intent.size() <= 1024 &&
+             data.guard_verdict is bool &&
+             data.logic_verdict is bool &&
+             data.trust_score is number &&
+             data.latency_ms is number &&
+             data.user_id is string && data.user_id.size() <= 128 &&
+             data.user_id == request.auth.uid;
+    }
+
+    // Entity Validation Blueprint: ActivePlan
+    function isValidActivePlan(data) {
+      return data.keys().hasAll(['id', 'intent', 'status', 'user_id']) &&
+             data.keys().hasOnly(['id', 'intent', 'description', 'status', 'steps', 'validation_errors', 'user_id', 'tenant_id', 'plan_hash', 'created_at', 'decided_by', 'decided_at', 'approver_role']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.intent is string && data.intent.size() <= 1024 &&
+             data.status is string && data.status in ['pending_consent', 'pending_semantic', 'authorized', 'blocked', 'executing', 'expired'] &&
+             data.user_id is string && data.user_id.size() <= 128 &&
+             data.user_id == request.auth.uid;
+    }
+
+    // 2. Healthcheck & Test Collection
     match /test/{docId} {
       allow get: if true;
-      allow write: if isSignedIn();
+      allow write: if isSignedIn() && isValidId(docId);
     }
 
-    // 3. Audit Logs: Read & Write for signed-in users with schema validation
+    // 3. Audit Logs Collection: Append-Only, Isolated by User/Admin
     match /audit_logs/{eventId} {
-      allow get: if isSignedIn() && isValidId(eventId);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(eventId) &&
-                      incoming().type is string &&
-                      incoming().type.size() <= 64 &&
-                      incoming().timestamp is number;
+      allow get: if isSignedIn() && isValidId(eventId) && (existing().user_id == request.auth.uid || isAdmin());
+      // Query Enforcer: Clients must filter by their own user_id or be an admin
+      allow list: if isSignedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
+      
+      // Append-Only: Creation permitted with valid blueprint
+      allow create: if isSignedIn() && isValidId(eventId) && isValidAuditEvent(incoming());
+      
+      // Strictly Immutable: No tampering, updating, or deleting audit logs
+      allow update, delete: if false;
     }
 
-    // 4. Active Plans: Users can read/write their own execution plans
+    // 4. Active Plans Collection: Isolated Stateful Workflow Plans
     match /active_plans/{planId} {
-      allow get: if isSignedIn() && isValidId(planId) && resource.data.user_id == request.auth.uid;
-      allow list: if isSignedIn() && resource.data.user_id == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(planId) && (existing().user_id == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
       
-      allow create: if isSignedIn() && isValidId(planId) && 
-                      incoming().user_id == request.auth.uid &&
+      // Plan Creation: Restricted to pending states
+      allow create: if isSignedIn() && isValidId(planId) &&
+                      isValidActivePlan(incoming()) &&
                       incoming().status in ['pending_consent', 'pending_semantic'];
-                      
+
+      // Plan Updates: Only valid status transitions and approver metadata
       allow update: if isSignedIn() && isValidId(planId) &&
-                      incoming().user_id == existing().user_id &&
-                      incoming().user_id == request.auth.uid && (
-                        (incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
-                         existing().status in ['pending_consent', 'pending_semantic'] &&
-                         incoming().status in ['authorized', 'blocked'])
+                      isValidActivePlan(incoming()) &&
+                      incoming().user_id == existing().user_id && (
+                        isAdmin() ||
+                        (
+                          existing().status in ['pending_consent', 'pending_semantic'] &&
+                          incoming().status in ['authorized', 'blocked', 'expired'] &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'decided_by', 'decided_at', 'approver_role'])
+                        )
                       );
+
+      allow delete: if isAdmin();
     }
   }
 }

@@ -13,19 +13,32 @@ COPY src ./src
 RUN npm run build
 
 # =========================================================
-# Stage 2: Production Python Kernel Engine (FastAPI + Z3)
+# Stage 2: Build Native Rust PEP Engine & Run Security Invariant Tests
+# =========================================================
+FROM rust:1.80-slim AS rust-builder
+WORKDIR /app
+
+COPY src/guardrail/pep_kernel/native_pep.rs ./native_pep.rs
+# Compile the native Tier-2 Data Plane PEP daemon with release optimizations
+RUN rustc -O native_pep.rs -o guardrail-pep-daemon && \
+    ./guardrail-pep-daemon
+
+# =========================================================
+# Stage 3: Production Python Kernel Engine (FastAPI + Z3 + Native PEP)
 # =========================================================
 FROM python:3.10-slim AS runner
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8888
+    PORT=8888 \
+    GUARDRAIL_ENV=production
 
-# Install system dependencies
+# Install system dependencies including libseccomp
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
+    libseccomp-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
@@ -38,6 +51,9 @@ COPY firebase-applet-config.json firebase-blueprint.json firestore.rules ./
 
 # Copy compiled static frontend build
 COPY --from=frontend-builder /app/dist ./dist
+
+# Copy verified native PEP binary
+COPY --from=rust-builder /app/guardrail-pep-daemon /usr/local/bin/guardrail-pep-daemon
 
 EXPOSE 8888
 

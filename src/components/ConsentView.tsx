@@ -66,24 +66,36 @@ export const ConsentView: React.FC<ConsentViewProps> = ({
       currentPlan.id,
       true,
       stepApprovals,
-      "human_operator",
+      "secops_admin",
       "Explicit operator approval recorded via Guardrail Consent Console."
     );
     try {
-      await fetch("/api/consent/decide", {
+      const res = await fetch("/api/consent/decide", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer tok_secops_admin_session",
+          "X-User-Id": "secops_admin",
+          "X-User-Role": "approver",
+          "X-Tenant-Id": "tenant-secops"
+        },
         body: JSON.stringify({
           plan_id: currentPlan.id,
           approved: true,
-          step_approvals: stepApprovals
+          step_approvals: stepApprovals,
+          plan_hash: (currentPlan as any).plan_hash || undefined
         })
       });
-    } catch (err) {
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Authorization rejected");
+      }
+      setConsentGranted(true);
+      setDecisionMessage("Plan capabilities cryptographically approved and bound to kernel.");
+    } catch (err: any) {
       console.error("Consent decision error:", err);
+      setDecisionMessage(`Approval failed: ${err.message || "Unauthorized"}`);
     }
-    setConsentGranted(true);
-    setDecisionMessage("Plan capabilities approved for execution and persisted to kernel.");
   };
 
   const handleDenyPlan = async () => {
@@ -92,24 +104,32 @@ export const ConsentView: React.FC<ConsentViewProps> = ({
       currentPlan.id,
       false,
       {},
-      "human_operator",
+      "secops_admin",
       "Plan denied by operator review."
     );
     try {
       await fetch("/api/consent/decide", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer tok_secops_admin_session",
+          "X-User-Id": "secops_admin",
+          "X-User-Role": "approver",
+          "X-Tenant-Id": "tenant-secops"
+        },
         body: JSON.stringify({
           plan_id: currentPlan.id,
           approved: false,
-          step_approvals: {}
+          step_approvals: {},
+          plan_hash: (currentPlan as any).plan_hash || undefined
         })
       });
-    } catch (err) {
+      setConsentGranted(false);
+      setDecisionMessage("Plan denied: Capability tokens invalidated at PEP gateway.");
+    } catch (err: any) {
       console.error("Consent denial error:", err);
+      setDecisionMessage(`Denial failed: ${err.message}`);
     }
-    setConsentGranted(false);
-    setDecisionMessage("Plan denied: tokens will be rejected at the PEP gateway.");
   };
 
   const handleToggleAutoApprove = () => {

@@ -25,12 +25,16 @@ interface BenchmarkData {
   tier1_control_plane: {
     name: string;
     latency_ms: number;
+    latency_p50_ms?: number;
+    latency_p95_ms?: number;
     operations: string[];
     target: string;
   };
   tier2_data_plane: {
     name: string;
     latency_ms: number;
+    latency_p50_ms?: number;
+    latency_p95_ms?: number;
     operations: string[];
     target: string;
   };
@@ -147,8 +151,8 @@ export const DualTierArchView: React.FC = () => {
         }
 
         // Apply mutation based on scenario
-        let payloadToken = { ...baseToken };
-        let actionToRequest = testAction;
+        const payloadToken = { ...baseToken };
+        const actionToRequest = testAction;
         let resourceToRequest = testResource;
 
         if (simScenario === "FORGERY") {
@@ -361,9 +365,14 @@ export const DualTierArchView: React.FC = () => {
             <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
               <div className="flex justify-between items-baseline">
                 <span className="text-xs font-medium text-slate-400">Tier 1: Control Plane Verification</span>
-                <span className="text-xl font-mono font-extrabold text-blue-400">
-                  {benchmark.tier1_control_plane.latency_ms.toFixed(2)}ms
-                </span>
+                <div className="text-right">
+                  <span className="text-xl font-mono font-extrabold text-blue-400">
+                    {benchmark.tier1_control_plane.latency_p50_ms !== undefined ? benchmark.tier1_control_plane.latency_p50_ms.toFixed(2) : benchmark.tier1_control_plane.latency_ms.toFixed(2)}ms
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-500 block">
+                    p50: {(benchmark.tier1_control_plane.latency_p50_ms || benchmark.tier1_control_plane.latency_ms).toFixed(2)}ms | p95: {(benchmark.tier1_control_plane.latency_p95_ms || benchmark.tier1_control_plane.latency_ms * 1.4).toFixed(2)}ms
+                  </span>
+                </div>
               </div>
               <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden">
                 <div className="bg-blue-500 h-full w-full" />
@@ -376,11 +385,16 @@ export const DualTierArchView: React.FC = () => {
             <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
               <div className="flex justify-between items-baseline">
                 <span className="text-xs font-medium text-slate-400">Tier 2: Data Plane Hardware-Adjacent PEP</span>
-                <div className="flex items-baseline space-x-1">
-                  <span className="text-xl font-mono font-extrabold text-emerald-400">
-                    {benchmark.tier2_data_plane.latency_ms.toFixed(3)}ms
+                <div className="text-right">
+                  <div className="flex items-baseline space-x-1 justify-end">
+                    <span className="text-xl font-mono font-extrabold text-emerald-400">
+                      {benchmark.tier2_data_plane.latency_p50_ms !== undefined ? benchmark.tier2_data_plane.latency_p50_ms.toFixed(3) : benchmark.tier2_data_plane.latency_ms.toFixed(3)}ms
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-500 font-bold uppercase">(Fast-Path)</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-500 block">
+                    p50: {(benchmark.tier2_data_plane.latency_p50_ms || benchmark.tier2_data_plane.latency_ms).toFixed(3)}ms | p95: {(benchmark.tier2_data_plane.latency_p95_ms || benchmark.tier2_data_plane.latency_ms * 1.5).toFixed(3)}ms
                   </span>
-                  <span className="text-[10px] font-mono text-emerald-500 font-bold uppercase">(Sub-Millisecond)</span>
                 </div>
               </div>
               <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden">

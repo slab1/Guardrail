@@ -109,7 +109,7 @@ export function mapActionToStep(
 
   let actionType = "file_read";
   let category: ToolCategory = "read";
-  let resource = target;
+  const resource = target;
   let reversible = true;
   let riskLevel: "low" | "medium" | "high" = "low";
 

@@ -2,32 +2,38 @@
   "entities": {
     "AuditEvent": {
       "title": "Audit Event",
-      "description": "A record of a kernel safety enforcement event.",
+      "description": "A cryptographic tamper-evident record of a kernel safety enforcement event.",
       "type": "object",
       "properties": {
         "timestamp": { "type": "number", "description": "Unix timestamp" },
-        "type": { "type": "string", "description": "Event type (e.g. INTENT_PROCESSED)" },
-        "intent": { "type": "string", "description": "User intent string" },
+        "type": { "type": "string", "description": "Event type (e.g. INTENT_PROCESSED)", "maxLength": 64 },
+        "intent": { "type": "string", "description": "User intent string", "maxLength": 1024 },
         "guard_verdict": { "type": "boolean", "description": "Semantic safety verdict" },
         "logic_verdict": { "type": "boolean", "description": "Logic invariant verdict" },
         "trust_score": { "type": "number", "description": "Calculated trust index" },
         "latency_ms": { "type": "number", "description": "PEP latency" },
-        "speculative": { "type": "boolean", "description": "Whether the check was speculative" }
+        "speculative": { "type": "boolean", "description": "Whether the check was speculative" },
+        "user_id": { "type": "string", "maxLength": 128 },
+        "tenant_id": { "type": "string", "maxLength": 128 },
+        "prev_hash": { "type": "string", "maxLength": 64 },
+        "hash": { "type": "string", "maxLength": 64 }
       },
-      "required": ["timestamp", "type", "intent", "guard_verdict", "logic_verdict", "trust_score", "latency_ms"]
+      "required": ["timestamp", "type", "intent", "guard_verdict", "logic_verdict", "trust_score", "latency_ms", "user_id"]
     },
     "ActivePlan": {
       "title": "Active Plan",
       "description": "An agent execution plan awaiting authorization or executing.",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "intent": { "type": "string" },
-        "description": { "type": "string" },
-        "status": { "type": "string", "enum": ["pending_consent", "pending_semantic", "authorized", "blocked", "executing"] },
+        "id": { "type": "string", "maxLength": 128 },
+        "intent": { "type": "string", "maxLength": 1024 },
+        "description": { "type": "string", "maxLength": 1024 },
+        "status": { "type": "string", "enum": ["pending_consent", "pending_semantic", "authorized", "blocked", "executing", "expired"] },
         "steps": { "type": "array", "description": "JSON serialized steps" },
         "validation_errors": { "type": "array" },
-        "user_id": { "type": "string" }
+        "user_id": { "type": "string", "maxLength": 128 },
+        "tenant_id": { "type": "string", "maxLength": 128 },
+        "plan_hash": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "intent", "status", "user_id"]
     }
@@ -35,11 +41,11 @@
   "firestore": {
     "/audit_logs/{eventId}": {
       "schema": "AuditEvent",
-      "description": "Global kernel audit trail"
+      "description": "Immutable kernel audit trail with user and tenant isolation"
     },
     "/active_plans/{planId}": {
       "schema": "ActivePlan",
-      "description": "Stateful agent execution plans"
+      "description": "Stateful agent execution plans with role and status constraints"
     }
   }
 }
