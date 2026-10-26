@@ -114,3 +114,20 @@ def test_data_plane_pep_future_clock_skew_rejected():
     
     result = pep.verify_and_enforce(tampered, "file_read", "/workspace/README.md")
     assert result["verdict"] == "TRAP_DENY"
+
+def test_data_plane_pep_revocation():
+    pep = DataPlanePEP()
+    tok1 = pep.issue_token("plan_test_revoke_1", "step_1", "file_read", "/workspace", 1)
+    tok2 = pep.issue_token("plan_test_revoke_2", "step_2", "file_write", "/workspace", 1)
+
+    # Revoke individual token
+    pep.revoke_token(tok1.token_id)
+    r1 = pep.verify_and_enforce(tok1.to_dict(), "file_read", "/workspace/README.md")
+    assert r1["verdict"] == "TRAP_DENY"
+    assert "revoked" in r1["reason"].lower()
+
+    # Revoke whole plan
+    pep.revoke_plan("plan_test_revoke_2")
+    r2 = pep.verify_and_enforce(tok2.to_dict(), "file_write", "/workspace/output.txt")
+    assert r2["verdict"] == "TRAP_DENY"
+    assert "revoked" in r2["reason"].lower()

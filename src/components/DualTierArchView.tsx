@@ -136,6 +136,16 @@ export const DualTierArchView: React.FC = () => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ intent: `Execute safe operation on ${testResource}` })
         });
+        if (!intentRes.ok) {
+          setSimResult({
+            verdict: "TRAP_DENY",
+            reason: `Tier 1 intent processing failed (HTTP ${intentRes.status})`,
+            syscall_trap: "EPERM",
+            latency_ms: 0.12,
+            tier: "Tier-2 Data Plane (Hardware-Adjacent PEP)"
+          });
+          return;
+        }
         const planData = await intentRes.json();
         const baseToken = planData.steps?.[0]?.capability_token;
 

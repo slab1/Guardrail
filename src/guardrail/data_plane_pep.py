@@ -282,6 +282,8 @@ class DataPlanePEP:
         self.secret_key = secret_key or get_kernel_pep_secret()
         self.nonce_store = DurableNonceStore()
         self.active_tokens: Dict[str, CapabilityToken] = {}
+        self.revoked_tokens: set = set()
+        self.revoked_plans: set = set()
         self.trap_history: List[Dict[str, Any]] = []
         self.total_enforcements: int = 0
         self.total_traps: int = 0
@@ -333,6 +335,14 @@ class DataPlanePEP:
         self.active_tokens[token.token_id] = token
         return token
 
+    def revoke_token(self, token_id: str):
+        if token_id:
+            self.revoked_tokens.add(token_id)
+
+    def revoke_plan(self, plan_id: str):
+        if plan_id:
+            self.revoked_plans.add(plan_id)
+
     def verify_and_enforce(
         self,
         token_data: Dict[str, Any],
@@ -342,6 +352,7 @@ class DataPlanePEP:
         """
         Fast-path Data Plane gate: Verified in <0.5ms.
         Enforces:
+        0. Active Token & Plan Revocation Check
         1. Cryptographic HMAC authenticity (Constant-time comparison)
         2. Nonce linearity & anti-replay (Durable atomic check-and-consume)
         3. Strict expiration window
@@ -361,6 +372,18 @@ class DataPlanePEP:
         expires_at = token_data.get("expires_at", 0)
         nonce = token_data.get("nonce", "")
         provided_sig = token_data.get("signature", "")
+
+        # 0. Revocation Check (Fail-Closed)
+        if (token_id and token_id in self.revoked_tokens) or (plan_id and plan_id in self.revoked_plans):
+            latency = (time.perf_counter() - t0) * 1000
+            self._record_trap("REVOKED_TOKEN", requested_action, target_resource, "Capability token or bound plan has been revoked")
+            return {
+                "verdict": "TRAP_DENY",
+                "reason": "Capability token or bound plan has been revoked by security policy",
+                "syscall_trap": "SIGSYS",
+                "latency_ms": latency,
+                "tier": "Tier-2 Data Plane (Hardware-Adjacent PEP)"
+            }
 
         # 1. Cryptographic Signature Verification (Fail-Closed)
         if not provided_sig or provided_sig.startswith("placeholder"):

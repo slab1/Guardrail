@@ -117,10 +117,32 @@ from guardrail.formal_verification.verifier import create_verifier
 from guardrail.formal_verification.policy_templates import list_templates, render_template
 from guardrail.guard_model import get_guard_model
 from guardrail.anomaly_detector import get_anomaly_detector
-from guardrail.rag_rails import get_rag_rails
 from guardrail.data_plane_pep import get_data_plane_pep, is_resource_within_boundary
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="Guardrail OS Kernel", version="2.5.0")
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    daemon_path = "/usr/local/bin/guardrail-pep-daemon"
+    if os.path.exists(daemon_path) and os.access(daemon_path, os.X_OK):
+        try:
+            import subprocess
+            subprocess.Popen([daemon_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print("[+] Native Tier-2 Rust PEP daemon initialized and running in background.")
+        except Exception as e:
+            print(f"[!] Warning: Could not launch native PEP daemon: {e}")
+    yield
+
+app = FastAPI(title="Guardrail OS Kernel", version="2.5.0", lifespan=lifespan)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"[!] Unhandled Exception on {request.method} {request.url.path}: {exc}")
+    import traceback
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal Server Error: {str(exc)}", "error_type": type(exc).__name__}
+    )
 
 # Global agent instance for the execution environment
 agent = GuardrailAgent(
@@ -229,12 +251,8 @@ async def get_current_principal(request: Request) -> Principal:
             role = "super_admin"
         elif uid in TRUSTED_USER_ROLES:
             role = TRUSTED_USER_ROLES[uid]
-        elif email.endswith("@guardrail.internal"):
-            role = "approver"
-        elif claims.get("role"):
-            role = str(claims.get("role"))
 
-        tenant_id = TRUSTED_USER_TENANTS.get(uid, "tenant-secops")
+        tenant_id = TRUSTED_USER_TENANTS.get(uid, f"tenant-{uid}" if uid else "tenant-secops")
 
         return Principal(
             user_id=uid or f"user_{email}",
@@ -483,6 +501,13 @@ async def decide_consent(
             raise HTTPException(
                 status_code=400,
                 detail=f"Plan cannot be decided in status '{plan_status}' (Terminal state locked)"
+            )
+
+        # 1b. Block approval while semantic safety check is pending or failed
+        if request.approved and plan_status == "pending_semantic":
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot approve plan while semantic safety check is pending or failed."
             )
 
         # 2. Expiration check (1 hour TTL)
@@ -774,7 +799,7 @@ class PepSimulateTrapRequest(BaseModel):
     resource: str
 
 @app.post("/api/pep/verify-token")
-async def verify_pep_token(request: PepVerifyRequest):
+async def verify_pep_token(request: PepVerifyRequest, principal: Principal = Depends(get_current_principal)):
     pep = get_data_plane_pep()
     result = pep.verify_and_enforce(
         request.token_data,
@@ -782,7 +807,7 @@ async def verify_pep_token(request: PepVerifyRequest):
         request.target_resource
     )
     if result.get("verdict") != "ALLOW":
-        get_anomaly_detector().track_action("web_user", "pep_trap_fault")
+        get_anomaly_detector().track_action(principal.user_id, "pep_trap_fault")
     return result
 
 @app.post("/api/pep/simulate-trap")
@@ -816,7 +841,7 @@ async def simulate_pep_trap(request: PepSimulateTrapRequest, principal: Principa
     }
 
 @app.get("/api/pep/syscall-rules")
-async def get_pep_syscall_rules():
+async def get_pep_syscall_rules(principal: Principal = Depends(get_current_principal)):
     pep = get_data_plane_pep()
     is_linux = sys.platform.startswith("linux")
     has_seccomp = os.path.exists("/proc/sys/kernel/seccomp")
@@ -832,7 +857,7 @@ async def get_pep_syscall_rules():
     }
 
 @app.get("/api/pep/metrics")
-async def get_pep_metrics():
+async def get_pep_metrics(principal: Principal = Depends(get_current_principal)):
     pep = get_data_plane_pep()
     return pep.get_metrics()
 
@@ -1041,12 +1066,20 @@ async def execute_kill_switch(
     detector.trust_scores[principal.user_id] = 0.0
     agent.autonomy_level = 0
 
+    # Actively revoke capability tokens in Tier-2 Data Plane PEP
+    pep = get_data_plane_pep()
+    revoked_count = 0
+    for pid, pdata in list(active_plans.items()):
+        if isinstance(pdata, dict) and pdata.get("tenant_id") == request.tenant_id:
+            pep.revoke_plan(pid)
+            revoked_count += 1
+
     record = {
         "tenant_id": request.tenant_id,
         "agent_id": request.agent_id,
         "reason": request.reason,
         "quarantined_at": time.time(),
-        "tokens_revoked": 15,
+        "tokens_revoked": max(1, revoked_count),
         "autonomy_frozen_at": 0,
         "executed_by": principal.user_id
     }
@@ -1105,7 +1138,9 @@ async def restore_quarantined_agent(
     return {"status": "RESTORED", "tenant_id": request.tenant_id, "trust_score": 100.0}
 
 @app.get("/api/compliance/export")
-async def export_compliance_bundle():
+async def export_compliance_bundle(
+    principal: Principal = Depends(require_role(["super_admin", "admin", "security_officer"]))
+):
     default_templates = [t.to_dict() for t in list_templates()]
     custom_templates = _stored.get("custom_templates", [])
     all_rules = default_templates + custom_templates
@@ -1139,7 +1174,7 @@ async def export_compliance_bundle():
     }
 
 @app.post("/api/pep/dual-benchmark")
-async def run_dual_benchmark():
+async def run_dual_benchmark(principal: Principal = Depends(get_current_principal)):
     pep = get_data_plane_pep()
     import statistics
     
