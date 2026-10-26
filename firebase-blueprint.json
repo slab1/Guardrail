@@ -16,7 +16,9 @@
         "user_id": { "type": "string", "maxLength": 128 },
         "tenant_id": { "type": "string", "maxLength": 128 },
         "prev_hash": { "type": "string", "maxLength": 64 },
-        "hash": { "type": "string", "maxLength": 64 }
+        "hash": { "type": "string", "maxLength": 64 },
+        "synced_by": { "type": "string", "maxLength": 128 },
+        "synced_at": { "type": "number", "description": "Client sync timestamp" }
       },
       "required": ["timestamp", "type", "intent", "guard_verdict", "logic_verdict", "trust_score", "latency_ms", "user_id"]
     },

@@ -108,7 +108,6 @@ export function onUserAuthStateChange(callback: (user: User | null) => void) {
   return onAuthStateChanged(auth, callback);
 }
 
-// Sync audit entry to Firestore cloud evidence repository
 export async function syncAuditEntryToFirestore(entry: Record<string, any>): Promise<boolean> {
   if (!auth.currentUser) return false;
   const eventId = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -116,6 +115,7 @@ export async function syncAuditEntryToFirestore(entry: Record<string, any>): Pro
   try {
     await setDoc(doc(db, "audit_logs", eventId), {
       ...entry,
+      user_id: auth.currentUser.uid,
       synced_by: auth.currentUser.uid,
       synced_at: Date.now()
     });

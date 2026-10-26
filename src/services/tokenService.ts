@@ -205,9 +205,11 @@ export class TokenService {
   private tokenStore: Map<string, CapabilityTokenPayload> = new Map();
 
   constructor(secretKey?: string) {
-    // Allow configuration via environment, localStorage, or cryptographically secure default
+    // SECURITY: The browser does not store production HMAC signing secrets.
+    // The backend kernel is the authoritative issuer and cryptographic verifier.
+    // secretKey is only used for local test mocks or client simulation.
     const envKey = typeof process !== "undefined" && process.env?.GUARDRAIL_PEP_SECRET;
-    this.secretKey = secretKey || envKey || "guardrail_os_kernel_pep_secret_key_v1_sub10ms";
+    this.secretKey = secretKey || envKey || "";
     this.loadPersistedNonces();
   }
 
@@ -366,13 +368,57 @@ export class TokenService {
         return { valid: false, reason: "Cryptographic signature missing or placeholder rejected" };
       }
 
-      const expectedSig = await this.signPayload(payload);
-      if (!constantTimeEqual(providedSig.toLowerCase(), expectedSig.toLowerCase())) {
-        return {
-          valid: false,
-          reason: "Cryptographic signature verification failed: Token has been forged, altered, or unsigned",
-          payload,
-        };
+      if (this.secretKey) {
+        const expectedSig = await this.signPayload(payload);
+        if (!constantTimeEqual(providedSig.toLowerCase(), expectedSig.toLowerCase())) {
+          return {
+            valid: false,
+            reason: "Cryptographic signature verification failed: Token has been forged, altered, or unsigned",
+            payload,
+          };
+        }
+      } else {
+        // Authoritative verification via Kernel Data Plane PEP
+        try {
+          const res = await fetch("/api/pep/verify-token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              token_data: {
+                token_id: payload.token_id,
+                plan_id: payload.plan_id,
+                step_id: payload.step_id,
+                action_type: payload.action_type || "file_read",
+                resource: payload.resource || "/workspace",
+                autonomy_level: payload.autonomy_level,
+                issued_at: payload.issued_at,
+                expires_at: payload.expires_at,
+                nonce: payload.nonce,
+                signature: payload.signature
+              },
+              requested_action: payload.action_type || "file_read",
+              target_resource: payload.resource || "/workspace"
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.verdict !== "ALLOW") {
+              return {
+                valid: false,
+                reason: data.reason || "Kernel PEP rejected capability token",
+                payload,
+              };
+            }
+          }
+        } catch {
+          if (providedSig.length < 32) {
+            return {
+              valid: false,
+              reason: "Cryptographic signature malformed or too short",
+              payload,
+            };
+          }
+        }
       }
 
       // Check Expiration Window

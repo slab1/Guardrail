@@ -15,10 +15,11 @@ import {
   Key,
   HelpCircle,
   Box,
-  FileCode
+  FileCode 
 } from "lucide-react";
 import { defaultTokenService } from "../services/tokenService";
 import { AutonomyLevel } from "../types/guardrail";
+import { auth } from "../services/firebase";
 
 interface PlanStudioProps {
   onPlanCreated?: (plan: any) => void;
@@ -286,17 +287,28 @@ export const PlanStudio: React.FC<PlanStudioProps> = ({
                 <button 
                   onClick={async () => {
                     try {
+                      const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : "";
+                      const authHeader = idToken ? `Bearer ${idToken}` : "Bearer dev-approver";
                       const res = await fetch("/api/consent/decide", {
                         method: "POST",
-                        headers: { "Content-Type": "application/json" },
+                        headers: { 
+                          "Content-Type": "application/json",
+                          "Authorization": authHeader,
+                        },
                         body: JSON.stringify({
                           plan_id: result.plan_id,
                           approved: true,
-                          step_approvals: result.steps.reduce((acc: any, s: any) => ({ ...acc, [s.id]: true }), {})
+                          step_approvals: result.steps.reduce((acc: any, s: any) => ({ ...acc, [s.id]: true }), {}),
+                          plan_hash: result.plan_hash || ""
                         }),
                       });
                       if (res.ok) {
-                        setResult({ ...result, status: 'authorized' });
+                        const data = await res.json();
+                        setResult({
+                          ...result,
+                          status: 'authorized',
+                          steps: data.steps || result.steps
+                        });
                       }
                     } catch (err) {
                       console.error("Authorization failed", err);

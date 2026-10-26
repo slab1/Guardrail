@@ -1,0 +1,141 @@
+# ==============================================================================
+# GUARDRAIL OS - SECURITY & AUTHORIZATION ENVELOPE (.envelope)
+# Production Security Boundary Specification, Zero-Trust Invariants & Governance
+# System ID: guardrail-os-kernel-v2.6 | Security Baseline: FIPS 140-3 / NIST AI RMF
+# ==============================================================================
+
+[ENVELOPE_METADATA]
+ENVELOPE_VERSION = "2.6.0"
+SYSTEM_ID = "guardrail-os-kernel"
+SECURITY_LEVEL = "PRODUCTION_STRICT"
+PRIMARY_AUTH_PROVIDER = "FIREBASE_AUTHENTICATION_OIDC"
+FIREBASE_PROJECT_ID = "gen-lang-client-0071016526"
+FIRESTORE_DATABASE_ID = "ai-studio-guardrail-88e17807-6d73-4f90-8eb4-0a23caabe4b4"
+BOOTSTRAP_ADMIN_EMAIL = "slablaykon@gmail.com"
+FAIL_CLOSED = true
+
+# ==============================================================================
+# 1. AUTHENTICATION & PRINCIPAL IDENTITY ENVELOPE
+# ==============================================================================
+[AUTH_IDENTITY_ENVELOPE]
+# All incoming requests to execution or authorization endpoints MUST present
+# a valid Firebase Auth ID Token (RS256 JWT issued by Google).
+TOKEN_ISSUER = "https://securetoken.google.com/gen-lang-client-0071016526"
+TOKEN_AUDIENCE = "gen-lang-client-0071016526"
+GOOGLE_PUBLIC_KEYS_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+
+# Invariants:
+# 1. The server MUST cryptographically verify Google's RS256 signature, expiry,
+#    issuer, and audience on every request.
+# 2. Caller headers ('X-User-Id', 'X-Tenant-Id', 'X-User-Role') are NEVER trusted
+#    for authorization decisions. Principal identity is strictly derived from token.uid.
+# 3. Roles are authoritatively assigned server-side:
+#    - Super Admin: slablaykon@gmail.com (Verified email matching BOOTSTRAP_ADMIN_EMAIL)
+#    - Approver: Tenant-assigned approvers from server-side database
+#    - Operator: Authenticated tenant operators
+#    - User: Default authenticated standard identity
+TRUST_CALLER_HEADERS = false
+MANDATORY_BEARER_AUTH = true
+
+# ==============================================================================
+# 2. CAPABILITY TOKEN ISSUANCE & SIGNING ENVELOPE
+# ==============================================================================
+[CAPABILITY_TOKEN_ENVELOPE]
+# Cryptographic Capability Tokens are issued EXCLUSIVELY by the backend Python Kernel PEP.
+# The frontend browser is NEVER entrusted with signing capability secrets.
+TOKEN_ALGORITHM = "HMAC-SHA256"
+KEY_IDENTIFIER = "v1"
+KEY_ROTATION_ENABLED = true
+SECRET_ENV_VAR = "GUARDRAIL_PEP_SECRET"
+CANONICAL_TOKEN_FORMAT = "gr_{header_b64url}.{payload_b64url}.{signature_hex}"
+CANONICAL_SIGNING_STRING = "{token_id}:{plan_id}:{step_id}:{action_type}:{resource}:{autonomy_level}:{issued_at}:{expires_at}:{nonce}"
+
+# Token Expiry Boundaries:
+STEP_TOKEN_MAX_TTL_SECONDS = 300       # 5 minutes for individual tool execution
+PLAN_TOKEN_MAX_TTL_SECONDS = 3600      # 1 hour for plan lifecycle
+CLOCK_SKEW_TOLERANCE_SECONDS = 60
+
+# Invariants:
+# 1. Unsigned, forged, altered, or expired tokens immediately trigger SIGSYS / TRAP_DENY.
+# 2. Client-side signing is forbidden. Frontend is purely a consumer/presenter.
+# 3. Tokens can ONLY be issued AFTER all security gates (Semantic Guard, SMT Invariant Solver,
+#    and Human Consent) are verified and in 'authorized' status.
+NO_TOKENS_ON_PENDING_SAFETY = true
+
+# ==============================================================================
+# 3. ANTI-REPLAY & LINEAR TOKEN ENVELOPE
+# ==============================================================================
+[REPLAY_PROTECTION_ENVELOPE]
+BACKEND = "SQLITE_WAL_TRANSACTIONAL"
+DB_PATH = "data/consumed_nonces.db"
+TABLE = "consumed_nonces"
+PRIMARY_KEY = "nonce"
+ATOMIC_CONSUME_ONCE = true
+
+# Invariants:
+# 1. Nonce linearity is checked and consumed in an ACID transaction prior to action dispatch.
+# 2. Re-presenting an already consumed nonce returns immediate TRAP_DENY (Replay Attack).
+# 3. Nonce state survives process restarts and is shared across all backend workers.
+
+# ==============================================================================
+# 4. CANONICAL RESOURCE ENVELOPE
+# ==============================================================================
+[RESOURCE_BOUNDARY_ENVELOPE]
+PATH_RESOLUTION = "CANONICAL_REALPATH"
+RESOLVE_SYMLINKS = true
+PREVENT_TRAVERSAL = true
+PREVENT_PREFIX_COLLISION = true
+
+# Boundary Rules:
+# - Target '/workspace' strictly rejects '/workspace-evil' and '/workspace_secret'.
+# - Directory traversal sequences ('../', '..\\', null-bytes '%00') are rejected.
+# - Symlinks pointing outside the designated root boundary are treated as boundary escapes.
+# - Network URL resources require exact host validation (e.g., api.github.com),
+#   forbidding wildcard suffix matching (e.g. *.github.com.evil.com).
+
+# ==============================================================================
+# 5. HUMAN-IN-THE-LOOP (HITL) CONSENT ENVELOPE
+# ==============================================================================
+[CONSENT_HITL_ENVELOPE]
+MANDATORY_PLAN_HASH = true
+HASH_ALGORITHM = "SHA-256"
+CANONICAL_HASH_PAYLOAD = "{plan_id}:{plan_description}:{tenant_id}:{steps_json_sorted}"
+DECISION_TTL_SECONDS = 3600            # 1 hour expiration for pending plans
+ATOMIC_STATE_TRANSITION = true         # asyncio.Lock serialization prevents concurrent double-decisions
+AUTHORIZED_APPROVER_ROLES = ["admin", "super_admin", "security_officer", "approver", "tenant_owner"]
+
+# Invariants:
+# 1. Plan approval MUST include the exact cryptographic 'plan_hash'. Missing or mismatch fails closed.
+# 2. Approver identity is authoritatively recorded (UID, Role, Tenant, Timestamp, Client IP).
+# 3. Approvers cannot approve cross-tenant plans without super_admin privilege.
+
+# ==============================================================================
+# 6. HARDWARE-ADJACENT DATA PLANE PEP & SECCOMP ENVELOPE
+# ==============================================================================
+[DATA_PLANE_PEP_ENVELOPE]
+DEFAULT_ACTION = "TRAP_SIGSYS"
+TRAP_SIGNAL = "SIGSYS (31)"
+NATIVE_BINARY_PATH = "/usr/local/bin/guardrail-pep-daemon"
+EXECUTION_LATENCY_TARGET_MS = 1.0
+
+# Autonomy Level Profiles:
+# Level 0 (Observer): read, openat(O_RDONLY), stat, fstat, close, mmap, exit_group.
+# Level 1 (Supervised): L0 + write(redirected to L-SFS CoW staging).
+# Level 2 (Semi-Autonomous): L1 + microvm sandboxed execution + egress filtering.
+# Level 3 (Autonomous): Continuous eBPF anomaly tracking and velocity degradation.
+
+# ==============================================================================
+# 7. FIRESTORE EVIDENCE REPOSITORY & AUDIT LEDGER ENVELOPE
+# ==============================================================================
+[AUDIT_LEDGER_ENVELOPE]
+CHAIN_ALGORITHM = "SHA-256_HASH_CHAIN"
+IMMUTABLE_APPEND_ONLY = true
+LEDGER_FILE = "data/audit_log.jsonl"
+FIRESTORE_COLLECTION = "audit_logs"
+
+# Allowed Audit Properties in Firestore:
+# [timestamp, type, intent, guard_verdict, logic_verdict, trust_score, latency_ms,
+#  user_id, tenant_id, speculative, details, prev_hash, hash, approver, synced_by, synced_at]
+READ_RESTRICTION = "RESOURCE_OWNER_OR_ADMIN"
+DISALLOW_UPDATE = true
+DISALLOW_DELETE = true

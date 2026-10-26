@@ -98,41 +98,43 @@ def is_resource_within_boundary(target_resource: str, granted_boundary: str) -> 
             t_url = urlparse(target_resource)
             b_url = urlparse(clean_boundary if (clean_boundary.startswith("http://") or clean_boundary.startswith("https://")) else f"https://{clean_boundary}")
             
-            # Wildcard domain match (e.g. *.github.com)
+            # Hostname / netloc check: exact or domain wildcard (*.domain.com)
             if b_url.netloc.startswith("*."):
                 suffix = b_url.netloc[2:]
-                return t_url.netloc == suffix or t_url.netloc.endswith("." + suffix)
-            
-            if t_url.netloc != b_url.netloc:
+                if not (t_url.netloc == suffix or t_url.netloc.endswith("." + suffix)):
+                    return False
+            elif t_url.netloc != b_url.netloc:
                 return False
                 
-            if not b_url.path or b_url.path == "/":
+            if not b_url.path or b_url.path == "/" or b_url.path == "":
                 return True
                 
-            return os.path.normpath(t_url.path).startswith(os.path.normpath(b_url.path))
+            b_path = os.path.normpath(b_url.path)
+            t_path = os.path.normpath(t_url.path)
+            if b_path == t_path:
+                return True
+            b_path_slash = b_path if b_path.endswith("/") else b_path + "/"
+            return t_path.startswith(b_path_slash)
         except Exception:
             return False
 
-    # Filesystem Path Canonicalization & Boundary Enforcement
+    # Filesystem Path Canonicalization & Boundary Enforcement (resolve symlinks via realpath)
     try:
-        norm_target = os.path.normpath(target_resource)
-        norm_boundary = os.path.normpath(clean_boundary)
+        resolved_target = os.path.realpath(os.path.abspath(target_resource))
+        resolved_boundary = os.path.realpath(os.path.abspath(clean_boundary))
 
-        # Boundary cannot be an empty path
-        if not norm_boundary:
+        if not resolved_boundary:
             return False
 
         # Exact match
-        if norm_target == norm_boundary:
+        if resolved_target == resolved_boundary:
             return True
 
-        # Check directory hierarchy boundary
-        # norm_boundary with trailing slash ensures path-component separation
+        # Check directory hierarchy boundary with separator
         sep = os.sep
-        boundary_dir = norm_boundary if norm_boundary.endswith(sep) else norm_boundary + sep
+        boundary_dir = resolved_boundary if resolved_boundary.endswith(sep) else resolved_boundary + sep
 
-        # Must strictly reside within directory hierarchy
-        if norm_target.startswith(boundary_dir):
+        if resolved_target.startswith(boundary_dir):
             return True
 
         return False

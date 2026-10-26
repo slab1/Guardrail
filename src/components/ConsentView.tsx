@@ -20,6 +20,7 @@ import {
   Unlock,
   AlertTriangle,
 } from "lucide-react";
+import { auth } from "../services/firebase";
 
 interface ConsentViewProps {
   currentPlan: ValidatedPlan | null;
@@ -70,25 +71,28 @@ export const ConsentView: React.FC<ConsentViewProps> = ({
       "Explicit operator approval recorded via Guardrail Consent Console."
     );
     try {
+      const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : "";
+      const authHeader = idToken ? `Bearer ${idToken}` : "Bearer dev-approver";
       const res = await fetch("/api/consent/decide", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer tok_secops_admin_session",
-          "X-User-Id": "secops_admin",
-          "X-User-Role": "approver",
-          "X-Tenant-Id": "tenant-secops"
+          "Authorization": authHeader,
         },
         body: JSON.stringify({
           plan_id: currentPlan.id,
           approved: true,
           step_approvals: stepApprovals,
-          plan_hash: (currentPlan as any).plan_hash || undefined
+          plan_hash: (currentPlan as any).plan_hash || ""
         })
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || "Authorization rejected");
+      }
+      const data = await res.json();
+      if (data.steps) {
+        (currentPlan as any).steps = data.steps;
       }
       setConsentGranted(true);
       setDecisionMessage("Plan capabilities cryptographically approved and bound to kernel.");
@@ -108,20 +112,19 @@ export const ConsentView: React.FC<ConsentViewProps> = ({
       "Plan denied by operator review."
     );
     try {
+      const idToken = auth.currentUser ? await auth.currentUser.getIdToken() : "";
+      const authHeader = idToken ? `Bearer ${idToken}` : "Bearer dev-approver";
       await fetch("/api/consent/decide", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": "Bearer tok_secops_admin_session",
-          "X-User-Id": "secops_admin",
-          "X-User-Role": "approver",
-          "X-Tenant-Id": "tenant-secops"
+          "Authorization": authHeader,
         },
         body: JSON.stringify({
           plan_id: currentPlan.id,
           approved: false,
           step_approvals: {},
-          plan_hash: (currentPlan as any).plan_hash || undefined
+          plan_hash: (currentPlan as any).plan_hash || ""
         })
       });
       setConsentGranted(false);
