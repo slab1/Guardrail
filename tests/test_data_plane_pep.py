@@ -2,11 +2,21 @@ import os
 import sys
 import time
 import pytest
+import shutil
 
 # Add src to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
 from guardrail.data_plane_pep import DataPlanePEP, CapabilityToken, is_resource_within_boundary
+
+@pytest.fixture(scope="module", autouse=True)
+def clean_nonce_db():
+    db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data/consumed_nonces.db'))
+    if os.path.exists(db_path):
+        try:
+            os.remove(db_path)
+        except Exception:
+            pass
 
 def test_data_plane_pep_happy_path():
     pep = DataPlanePEP()
@@ -16,7 +26,7 @@ def test_data_plane_pep_happy_path():
     assert result["verdict"] == "ALLOW"
     assert result["syscall_trap"] is None
     # Sub-10ms PEP fast path budget target, resilient to shared cloud CI runner virtualization
-    # CI runners have variable latency; allow up to 500ms for test stability
+    # CI runners have variable latency; allow up to 500ms for test stability with SQLite WAL
     assert result["latency_ms"] < 500.0
 
 def test_data_plane_pep_linear_token_replay_blocked():
