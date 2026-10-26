@@ -285,7 +285,14 @@ fn main() {
     println!("[Guardrail OS] Cryptographic HMAC-SHA256 signature verification active.");
     println!("[Guardrail OS] Running self-test suite...");
 
-    let secret = b"guardrail_os_kernel_pep_secret_key_v1_sub10ms".to_vec();
+    let secret = match std::env::var("GUARDRAIL_PEP_SECRET") {
+        Ok(val) => val.into_bytes(),
+        Err(_) => {
+            // Dynamic ephemeral key for test suite execution without hardcoded static credentials
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+            crypto::sha256(&now.to_be_bytes()).to_vec()
+        }
+    };
     let mut pep = NativeDataPlanePEP::new(secret);
 
     let mut valid_token = CapabilityToken {

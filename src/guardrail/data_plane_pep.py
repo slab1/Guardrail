@@ -98,41 +98,43 @@ def is_resource_within_boundary(target_resource: str, granted_boundary: str) -> 
             t_url = urlparse(target_resource)
             b_url = urlparse(clean_boundary if (clean_boundary.startswith("http://") or clean_boundary.startswith("https://")) else f"https://{clean_boundary}")
             
-            # Wildcard domain match (e.g. *.github.com)
+            # Hostname / netloc check: exact or domain wildcard (*.domain.com)
             if b_url.netloc.startswith("*."):
                 suffix = b_url.netloc[2:]
-                return t_url.netloc == suffix or t_url.netloc.endswith("." + suffix)
-            
-            if t_url.netloc != b_url.netloc:
+                if not (t_url.netloc == suffix or t_url.netloc.endswith("." + suffix)):
+                    return False
+            elif t_url.netloc != b_url.netloc:
                 return False
                 
-            if not b_url.path or b_url.path == "/":
+            if not b_url.path or b_url.path == "/" or b_url.path == "":
                 return True
                 
-            return os.path.normpath(t_url.path).startswith(os.path.normpath(b_url.path))
+            b_path = os.path.normpath(b_url.path)
+            t_path = os.path.normpath(t_url.path)
+            if b_path == t_path:
+                return True
+            b_path_slash = b_path if b_path.endswith("/") else b_path + "/"
+            return t_path.startswith(b_path_slash)
         except Exception:
             return False
 
-    # Filesystem Path Canonicalization & Boundary Enforcement
+    # Filesystem Path Canonicalization & Boundary Enforcement (resolve symlinks via realpath)
     try:
-        norm_target = os.path.normpath(target_resource)
-        norm_boundary = os.path.normpath(clean_boundary)
+        resolved_target = os.path.realpath(os.path.abspath(target_resource))
+        resolved_boundary = os.path.realpath(os.path.abspath(clean_boundary))
 
-        # Boundary cannot be an empty path
-        if not norm_boundary:
+        if not resolved_boundary:
             return False
 
         # Exact match
-        if norm_target == norm_boundary:
+        if resolved_target == resolved_boundary:
             return True
 
-        # Check directory hierarchy boundary
-        # norm_boundary with trailing slash ensures path-component separation
+        # Check directory hierarchy boundary with separator
         sep = os.sep
-        boundary_dir = norm_boundary if norm_boundary.endswith(sep) else norm_boundary + sep
+        boundary_dir = resolved_boundary if resolved_boundary.endswith(sep) else resolved_boundary + sep
 
-        # Must strictly reside within directory hierarchy
-        if norm_target.startswith(boundary_dir):
+        if resolved_target.startswith(boundary_dir):
             return True
 
         return False
@@ -280,6 +282,8 @@ class DataPlanePEP:
         self.secret_key = secret_key or get_kernel_pep_secret()
         self.nonce_store = DurableNonceStore()
         self.active_tokens: Dict[str, CapabilityToken] = {}
+        self.revoked_tokens: set = set()
+        self.revoked_plans: set = set()
         self.trap_history: List[Dict[str, Any]] = []
         self.total_enforcements: int = 0
         self.total_traps: int = 0
@@ -331,6 +335,14 @@ class DataPlanePEP:
         self.active_tokens[token.token_id] = token
         return token
 
+    def revoke_token(self, token_id: str):
+        if token_id:
+            self.revoked_tokens.add(token_id)
+
+    def revoke_plan(self, plan_id: str):
+        if plan_id:
+            self.revoked_plans.add(plan_id)
+
     def verify_and_enforce(
         self,
         token_data: Dict[str, Any],
@@ -340,6 +352,7 @@ class DataPlanePEP:
         """
         Fast-path Data Plane gate: Verified in <0.5ms.
         Enforces:
+        0. Active Token & Plan Revocation Check
         1. Cryptographic HMAC authenticity (Constant-time comparison)
         2. Nonce linearity & anti-replay (Durable atomic check-and-consume)
         3. Strict expiration window
@@ -359,6 +372,18 @@ class DataPlanePEP:
         expires_at = token_data.get("expires_at", 0)
         nonce = token_data.get("nonce", "")
         provided_sig = token_data.get("signature", "")
+
+        # 0. Revocation Check (Fail-Closed)
+        if (token_id and token_id in self.revoked_tokens) or (plan_id and plan_id in self.revoked_plans):
+            latency = (time.perf_counter() - t0) * 1000
+            self._record_trap("REVOKED_TOKEN", requested_action, target_resource, "Capability token or bound plan has been revoked")
+            return {
+                "verdict": "TRAP_DENY",
+                "reason": "Capability token or bound plan has been revoked by security policy",
+                "syscall_trap": "SIGSYS",
+                "latency_ms": latency,
+                "tier": "Tier-2 Data Plane (Hardware-Adjacent PEP)"
+            }
 
         # 1. Cryptographic Signature Verification (Fail-Closed)
         if not provided_sig or provided_sig.startswith("placeholder"):

@@ -30,7 +30,7 @@ service cloud.firestore {
     // Entity Validation Blueprint: AuditEvent
     function isValidAuditEvent(data) {
       return data.keys().hasAll(['timestamp', 'type', 'intent', 'guard_verdict', 'logic_verdict', 'trust_score', 'latency_ms', 'user_id']) &&
-             data.keys().hasOnly(['timestamp', 'type', 'intent', 'guard_verdict', 'logic_verdict', 'trust_score', 'latency_ms', 'user_id', 'tenant_id', 'speculative', 'details', 'prev_hash', 'hash', 'approver']) &&
+             data.keys().hasOnly(['timestamp', 'type', 'intent', 'guard_verdict', 'logic_verdict', 'trust_score', 'latency_ms', 'user_id', 'tenant_id', 'speculative', 'details', 'prev_hash', 'hash', 'approver', 'synced_by', 'synced_at']) &&
              data.timestamp is number &&
              data.type is string && data.type.size() <= 64 &&
              data.intent is string && data.intent.size() <= 1024 &&
@@ -39,7 +39,9 @@ service cloud.firestore {
              data.trust_score is number &&
              data.latency_ms is number &&
              data.user_id is string && data.user_id.size() <= 128 &&
-             data.user_id == request.auth.uid;
+             data.user_id == request.auth.uid &&
+             (!('synced_by' in data) || (data.synced_by is string && data.synced_by.size() <= 128)) &&
+             (!('synced_at' in data) || data.synced_at is number);
     }
 
     // Entity Validation Blueprint: ActivePlan
