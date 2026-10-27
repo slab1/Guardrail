@@ -774,7 +774,10 @@ def check_native_pep_daemon() -> Dict[str, Any]:
     env_sock = os.environ.get("GUARDRAIL_PEP_SOCKET")
     if env_sock:
         candidate_sockets.append(env_sock)
-    candidate_sockets.extend(["/run/guardrail/pep.sock", "/tmp/guardrail_pep.sock"])
+    import tempfile
+    candidate_sockets.append("/run/guardrail/pep.sock")
+    candidate_sockets.append(os.path.join(DATA_DIR, "pep.sock"))
+    candidate_sockets.append(os.path.join(tempfile.gettempdir(), "guardrail_pep.sock"))
 
     port = int(os.environ.get("GUARDRAIL_PEP_PORT", "8889"))
     host = os.environ.get("GUARDRAIL_PEP_HOST", "127.0.0.1")
@@ -1383,4 +1386,4 @@ async def run_dual_benchmark(principal: Principal = Depends(get_current_principa
 if __name__ == "__main__":
     import uvicorn
     # Run on 8888 so Express/Vite can proxy to it
-    uvicorn.run(app, host="0.0.0.0", port=8888)
+    uvicorn.run(app, host=os.environ.get("GUARDRAIL_HOST", "0.0.0.0"), port=8888)  # nosec B104

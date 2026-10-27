@@ -702,7 +702,7 @@ fn main() {
 
     let effective_sock_path = if let Some(parent) = std::path::Path::new(&raw_sock_path).parent() {
         if std::fs::create_dir_all(parent).is_err() {
-            "/tmp/guardrail_pep.sock".to_string()
+            std::env::temp_dir().join("guardrail_pep.sock").to_string_lossy().to_string()
         } else {
             raw_sock_path
         }

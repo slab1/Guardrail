@@ -366,7 +366,10 @@ def verify_via_native_rust_pep(
     env_socket = os.environ.get("GUARDRAIL_PEP_SOCKET")
     if env_socket:
         candidate_sockets.append(env_socket)
-    candidate_sockets.extend(["/run/guardrail/pep.sock", "/tmp/guardrail_pep.sock"])
+    import tempfile
+    candidate_sockets.append("/run/guardrail/pep.sock")
+    candidate_sockets.append(os.path.join(DATA_DIR, "pep.sock"))
+    candidate_sockets.append(os.path.join(tempfile.gettempdir(), "guardrail_pep.sock"))
 
     connected_socket = None
     for sock_path in candidate_sockets:
