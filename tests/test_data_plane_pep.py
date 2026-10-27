@@ -141,3 +141,26 @@ def test_data_plane_pep_revocation():
     r2 = pep.verify_and_enforce(tok2.to_dict(), "file_write", "/workspace/output.txt")
     assert r2["verdict"] == "TRAP_DENY"
     assert "revoked" in r2["reason"].lower()
+
+def test_durable_revocation_persistence():
+    pep1 = DataPlanePEP()
+    tok = pep1.issue_token("plan_persisted_rev", "step_1", "file_read", "/workspace", 1)
+    pep1.revoke_token(tok.token_id)
+
+    # Initialize new DataPlanePEP instance (simulating worker process restart)
+    pep2 = DataPlanePEP()
+    res = pep2.verify_and_enforce(tok.to_dict(), "file_read", "/workspace/README.md")
+    assert res["verdict"] == "TRAP_DENY"
+    assert "revoked" in res["reason"].lower()
+
+def test_fail_closed_native_pep_mode(monkeypatch):
+    monkeypatch.setenv("GUARDRAIL_USE_NATIVE_PEP", "1")
+    monkeypatch.setenv("REQUIRE_NATIVE_PEP", "1")
+
+    pep = DataPlanePEP()
+    tok = pep.issue_token("plan_native_test", "step_1", "file_read", "/workspace", 1)
+
+    # When native daemon socket is unreachable and REQUIRE_NATIVE_PEP=1, must FAIL CLOSED
+    res = pep.verify_and_enforce(tok.to_dict(), "file_read", "/workspace/README.md")
+    assert res["verdict"] == "TRAP_DENY"
+    assert "CRITICAL: Native Rust PEP daemon disconnected" in res["reason"]

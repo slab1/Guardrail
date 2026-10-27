@@ -230,6 +230,102 @@ class DurableNonceStore:
             pass
 
 
+class DurableRevocationStore:
+    """
+    Durable SQLite WAL store for token and plan revocations.
+    Ensures revocations persist across process restarts and are shared across workers.
+    """
+    def __init__(self, db_path: str = NONCES_DB):
+        self.db_path = db_path
+        self._lock = threading.Lock()
+        self._init_db()
+
+    def _init_db(self):
+        try:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("PRAGMA synchronous=NORMAL;")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS revocations (
+                        id TEXT PRIMARY KEY,
+                        target_type TEXT,
+                        revoked_at REAL
+                    );
+                """)
+                conn.commit()
+        except Exception as e:
+            print(f"[!] Warning: DurableRevocationStore init failed: {e}")
+
+    def revoke(self, target_id: str, target_type: str = "token"):
+        if not target_id:
+            return
+        with self._lock:
+            try:
+                with sqlite3.connect(self.db_path, timeout=2.0) as conn:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO revocations (id, target_type, revoked_at) VALUES (?, ?, ?)",
+                        (target_id, target_type, time.time())
+                    )
+                    conn.commit()
+            except Exception as e:
+                print(f"[!] Warning: DurableRevocationStore write failed: {e}")
+
+    def load_all(self) -> Tuple[set, set]:
+        tokens, plans = set(), set()
+        try:
+            with sqlite3.connect(self.db_path, timeout=5.0) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT id, target_type FROM revocations")
+                for row in cur.fetchall():
+                    if row[1] == "plan":
+                        plans.add(row[0])
+                    else:
+                        tokens.add(row[0])
+        except Exception:
+            pass
+        return tokens, plans
+
+
+def verify_via_native_rust_pep(
+    token_data: Dict[str, Any],
+    requested_action: str,
+    target_resource: str,
+    host: str = "127.0.0.1",
+    port: int = 8889
+) -> Optional[Dict[str, Any]]:
+    """
+    Dispatches token verification request to the Native Rust PEP daemon over TCP IPC.
+    Returns response dict if daemon is reachable and responds, else None.
+    """
+    import socket
+    import json
+    payload = dict(token_data)
+    payload["requested_action"] = requested_action
+    payload["target_resource"] = target_resource
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        s.connect((host, port))
+        s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+
+        response_bytes = b""
+        while True:
+            chunk = s.recv(1024)
+            if not chunk:
+                break
+            response_bytes += chunk
+            if b"\n" in response_bytes:
+                break
+        s.close()
+
+        if response_bytes:
+            return json.loads(response_bytes.decode("utf-8").strip())
+    except Exception:
+        return None
+    return None
+
+
 class CapabilityToken:
     def __init__(
         self,
@@ -281,9 +377,9 @@ class DataPlanePEP:
     def __init__(self, secret_key: Optional[bytes] = None):
         self.secret_key = secret_key or get_kernel_pep_secret()
         self.nonce_store = DurableNonceStore()
+        self.revocation_store = DurableRevocationStore()
         self.active_tokens: Dict[str, CapabilityToken] = {}
-        self.revoked_tokens: set = set()
-        self.revoked_plans: set = set()
+        self.revoked_tokens, self.revoked_plans = self.revocation_store.load_all()
         self.trap_history: List[Dict[str, Any]] = []
         self.total_enforcements: int = 0
         self.total_traps: int = 0
@@ -338,10 +434,12 @@ class DataPlanePEP:
     def revoke_token(self, token_id: str):
         if token_id:
             self.revoked_tokens.add(token_id)
+            self.revocation_store.revoke(token_id, "token")
 
     def revoke_plan(self, plan_id: str):
         if plan_id:
             self.revoked_plans.add(plan_id)
+            self.revocation_store.revoke(plan_id, "plan")
 
     def verify_and_enforce(
         self,
@@ -361,6 +459,26 @@ class DataPlanePEP:
         """
         t0 = time.perf_counter()
         self.total_enforcements += 1
+
+        # Native Rust PEP daemon IPC dispatch (if configured)
+        if os.environ.get("GUARDRAIL_USE_NATIVE_PEP", "").lower() in ["1", "true", "yes"]:
+            native_res = verify_via_native_rust_pep(token_data, requested_action, target_resource)
+            if native_res is not None:
+                if native_res.get("verdict") == "ALLOW":
+                    return native_res
+                else:
+                    self._record_trap("NATIVE_PEP_DENY", requested_action, target_resource, native_res.get("reason", "Native PEP Denied"))
+                    return native_res
+            elif os.environ.get("REQUIRE_NATIVE_PEP", "").lower() in ["1", "true", "yes"]:
+                latency = (time.perf_counter() - t0) * 1000
+                self._record_trap("NATIVE_PEP_DISCONNECTED", requested_action, target_resource, "Native Rust PEP daemon unreachable")
+                return {
+                    "verdict": "TRAP_DENY",
+                    "reason": "CRITICAL: Native Rust PEP daemon disconnected (Fail-Closed Security Policy)",
+                    "syscall_trap": "SIGSYS",
+                    "latency_ms": latency,
+                    "tier": "Tier-2 Native Rust PEP Daemon (Disconnected)"
+                }
 
         token_id = token_data.get("token_id", "")
         plan_id = token_data.get("plan_id", "")

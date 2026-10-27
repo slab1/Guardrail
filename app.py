@@ -148,9 +148,11 @@ async def global_exception_handler(request: Request, exc: Exception):
     print(f"[!] Unhandled Exception on {request.method} {request.url.path}: {exc}")
     import traceback
     traceback.print_exc()
+    is_debug = os.environ.get("GUARDRAIL_DEBUG", "").lower() in ["1", "true"]
+    error_msg = str(exc) if is_debug else "An internal server error occurred"
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal Server Error: {str(exc)}", "error_type": type(exc).__name__}
+        content={"detail": error_msg, "error_type": type(exc).__name__ if is_debug else "InternalServerError"}
     )
 
 # Global agent instance for the execution environment
@@ -737,6 +739,22 @@ async def reset_trust(
     detector.action_history["web_user"] = []
     return {"status": "success", "trust_score": request.score, "reset_by": principal.user_id}
 
+def check_native_pep_daemon() -> Dict[str, Any]:
+    import socket
+    port = int(os.environ.get("GUARDRAIL_PEP_PORT", "8889"))
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.2)
+        s.connect(("127.0.0.1", port))
+        s.sendall(b'{"type":"ping"}\n')
+        buf = s.recv(512)
+        s.close()
+        if buf and b"healthy" in buf:
+            return {"connected": True, "status": "ONLINE_IPC_SOCKET", "engine": "Guardrail Native Rust PEP v2.5"}
+    except Exception:
+        pass
+    return {"connected": False, "status": "STANDALONE_FALLBACK", "engine": "Python Hardware-Adjacent PEP"}
+
 # Public Read-Only Health & Telemetry Probes
 @app.get("/api/kernel/state", tags=["Public Monitoring"])
 async def get_kernel_state():
@@ -750,6 +768,7 @@ async def get_kernel_state():
     # Check whether running in Linux with native seccomp/bpf
     is_linux = sys.platform.startswith("linux")
     has_seccomp_bpf = os.path.exists("/proc/sys/kernel/seccomp") or os.path.exists("/sys/fs/bpf")
+    native_info = check_native_pep_daemon()
 
     return {
         "trust_score": get_anomaly_detector().get_trust_score("web_user"),
@@ -758,10 +777,27 @@ async def get_kernel_state():
         "pep_latency_target": "sub-1ms (Cryptographic HMAC-SHA256)",
         "guard_model_status": "ready" if get_guard_model().model else "ready_heuristic",
         "uptime": time.time(),
-        "pep_enforcement_mode": "NATIVE_SECCOMP_EBPF" if (is_linux and has_seccomp_bpf) else "HARDWARE_ADJACENT_PEP_EMULATION",
-        "native_syscall_attached": is_linux and has_seccomp_bpf,
+        "pep_enforcement_mode": "NATIVE_RUST_IPC_DAEMON" if native_info["connected"] else ("NATIVE_SECCOMP_EBPF" if (is_linux and has_seccomp_bpf) else "HARDWARE_ADJACENT_PEP_EMULATION"),
+        "native_syscall_attached": native_info["connected"] or (is_linux and has_seccomp_bpf),
+        "native_pep_daemon": native_info,
         "cryptographic_signatures_enforced": True,
         "replay_protection_mode": "DURABLE_ACID_SQLITE"
+    }
+
+@app.get("/api/pep/health", tags=["Public Health"])
+async def get_pep_health():
+    """Health status check for PEP Data Plane & Native Engine."""
+    pep = get_data_plane_pep()
+    native_info = check_native_pep_daemon()
+    return {
+        "status": "healthy",
+        "durable_replay_store": "active_sqlite_wal",
+        "durable_revocation_store": "active_sqlite_wal",
+        "consumed_nonces_hot_cache": len(pep.nonce_store._hot_cache),
+        "revoked_tokens_count": len(pep.revoked_tokens),
+        "revoked_plans_count": len(pep.revoked_plans),
+        "native_pep_daemon": native_info,
+        "fail_closed_mode": True
     }
 
 @app.get("/api/verifier/status", tags=["Public Health"])

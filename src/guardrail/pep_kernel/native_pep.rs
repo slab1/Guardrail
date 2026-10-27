@@ -370,12 +370,117 @@ fn main() {
         std::process::exit(0);
     }
 
-    println!("  [Guardrail OS] Tier-2 PEP daemon is running (awaiting integration).");
-    println!("  [Guardrail OS] To integrate, expose a socket/IPC interface to the Python kernel.");
-    // Keep the daemon alive; do not exit after self-tests.
-    // This prevents the process from terminating immediately after validation.
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(5));
+    println!("  [Guardrail OS] Tier-2 Native Rust PEP IPC socket server initializing...");
+    let port = std::env::var("GUARDRAIL_PEP_PORT").unwrap_or_else(|_| "8889".to_string());
+    let bind_addr = format!("127.0.0.1:{}", port);
+
+    match std::net::TcpListener::bind(&bind_addr) {
+        Ok(listener) => {
+            println!("[Guardrail OS] Native Rust PEP daemon listening for IPC on TCP {}", bind_addr);
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        handle_ipc_connection(stream, &mut pep);
+                    }
+                    Err(e) => {
+                        eprintln!("[Guardrail OS] IPC connection error: {}", e);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[Guardrail OS] Could not bind PEP IPC socket on {}: {}", bind_addr, e);
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
+        }
+    }
+}
+
+fn extract_json_str(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{}\"", key);
+    if let Some(pos) = json.find(&pattern) {
+        let after = &json[pos + pattern.len()..];
+        if let Some(colon) = after.find(':') {
+            let val_part = after[colon + 1..].trim();
+            if val_part.starts_with('"') {
+                let rest = &val_part[1..];
+                if let Some(end_quote) = rest.find('"') {
+                    return Some(rest[..end_quote].to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_json_num(json: &str, key: &str) -> Option<u64> {
+    let pattern = format!("\"{}\"", key);
+    if let Some(pos) = json.find(&pattern) {
+        let after = &json[pos + pattern.len()..];
+        if let Some(colon) = after.find(':') {
+            let val_part = after[colon + 1..].trim();
+            let num_str: String = val_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if !num_str.is_empty() {
+                return num_str.parse::<u64>().ok();
+            }
+        }
+    }
+    None
+}
+
+fn handle_ipc_connection(mut stream: std::net::TcpStream, pep: &mut NativeDataPlanePEP) {
+    use std::io::{BufRead, BufReader, Write};
+    let mut reader = BufReader::new(match stream.try_clone() {
+        Ok(s) => s,
+        Err(_) => return,
+    });
+    let mut line = String::new();
+    while let Ok(bytes) = reader.read_line(&mut line) {
+        if bytes == 0 {
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            line.clear();
+            continue;
+        }
+
+        let resp = if trimmed.contains("\"ping\"") || trimmed.contains("\"health_check\"") {
+            format!("{{\"status\":\"healthy\",\"engine\":\"Guardrail Native Rust PEP v2.5\",\"consumed_nonces\":{}}}\n", pep.consumed_nonces.len())
+        } else {
+            let token = CapabilityToken {
+                token_id: extract_json_str(trimmed, "token_id").unwrap_or_default(),
+                plan_id: extract_json_str(trimmed, "plan_id").unwrap_or_default(),
+                step_id: extract_json_str(trimmed, "step_id").unwrap_or_default(),
+                action_type: extract_json_str(trimmed, "action_type").unwrap_or_default(),
+                resource: extract_json_str(trimmed, "resource").unwrap_or_default(),
+                autonomy_level: extract_json_num(trimmed, "autonomy_level").unwrap_or(0) as u8,
+                issued_at: extract_json_num(trimmed, "issued_at").unwrap_or(0),
+                expires_at: extract_json_num(trimmed, "expires_at").unwrap_or(0),
+                nonce: extract_json_str(trimmed, "nonce").unwrap_or_default(),
+                signature: extract_json_str(trimmed, "signature").unwrap_or_default(),
+            };
+            let requested_action = extract_json_str(trimmed, "requested_action")
+                .unwrap_or_else(|| token.action_type.clone());
+            let target_resource = extract_json_str(trimmed, "target_resource")
+                .unwrap_or_else(|| token.resource.clone());
+
+            match pep.verify_and_enforce(&token, &requested_action, &target_resource) {
+                Ok(elapsed_us) => format!(
+                    "{{\"verdict\":\"ALLOW\",\"reason\":\"Cryptographic HMAC token verified by Native Rust PEP Engine\",\"latency_ms\":{:.3},\"tier\":\"Tier-2 Native Rust PEP Daemon\"}}\n",
+                    (elapsed_us as f64) / 1000.0
+                ),
+                Err(reason) => format!(
+                    "{{\"verdict\":\"TRAP_DENY\",\"reason\":\"{}\",\"latency_ms\":0.01,\"tier\":\"Tier-2 Native Rust PEP Daemon\"}}\n",
+                    reason.replace('"', "\\\"")
+                ),
+            }
+        };
+
+        let _ = stream.write_all(resp.as_bytes());
+        let _ = stream.flush();
+        line.clear();
     }
 }
 
