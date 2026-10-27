@@ -21,7 +21,7 @@ WORKDIR /app
 COPY src/guardrail/pep_kernel/native_pep.rs ./native_pep.rs
 # Compile the native Tier-2 Data Plane PEP daemon with release optimizations
 RUN rustc -O native_pep.rs -o guardrail-pep-daemon && \
-    ./guardrail-pep-daemon
+    GUARDRAIL_PEP_SECRET="ci_pipeline_secure_random_key_987654321" PEP_SELF_TEST_ONLY="1" ./guardrail-pep-daemon
 
 # =========================================================
 # Stage 3: Production Python Kernel Engine (FastAPI + Z3 + Native PEP)

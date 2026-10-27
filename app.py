@@ -44,12 +44,21 @@ def append_to_audit_ledger(entry: Dict[str, Any]):
     except Exception as e:
         print(f"[!] Warning: Could not write to audit ledger: {e}")
 
+from enum import Enum
+
 def json_default_serializer(obj):
-    if hasattr(obj, "to_dict"):
-        return obj.to_dict()
-    if hasattr(obj, "__dict__"):
-        return {k: v for k, v in obj.__dict__.items() if not k.startswith("_")}
-    return str(obj)
+    try:
+        if hasattr(obj, "to_dict") and callable(getattr(obj, "to_dict")):
+            return obj.to_dict()
+        if isinstance(obj, Enum):
+            return obj.value
+        if isinstance(obj, set):
+            return list(obj)
+        if hasattr(obj, "__dict__"):
+            return {k: (v.value if isinstance(v, Enum) else v) for k, v in obj.__dict__.items() if not k.startswith("_")}
+        return str(obj)
+    except Exception:
+        return str(obj)
 
 def save_storage(logs, plans, templates=None):
     try:
@@ -57,10 +66,10 @@ def save_storage(logs, plans, templates=None):
         for pid, pdata in plans.items():
             if isinstance(pdata, dict):
                 clean_plans[pid] = pdata
-            elif hasattr(pdata, "to_dict"):
+            elif hasattr(pdata, "to_dict") and callable(getattr(pdata, "to_dict")):
                 clean_plans[pid] = pdata.to_dict()
             elif hasattr(pdata, "__dict__"):
-                clean_plans[pid] = {k: v for k, v in pdata.__dict__.items() if not k.startswith("_")}
+                clean_plans[pid] = {k: (v.value if isinstance(v, Enum) else v) for k, v in pdata.__dict__.items() if not k.startswith("_")}
             else:
                 clean_plans[pid] = str(pdata)
 

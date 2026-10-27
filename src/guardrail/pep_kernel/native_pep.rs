@@ -362,6 +362,14 @@ fn main() {
     println!("  [✓] Resource prefix escape (/workspace-evil) blocked");
 
     println!("[Guardrail OS] All native security regression tests PASSED.");
+
+    if std::env::var("PEP_SELF_TEST_ONLY").is_ok()
+        || std::env::args().any(|arg| arg == "--test" || arg == "--self-test")
+    {
+        println!("  [Guardrail OS] Self-test execution finished successfully.");
+        std::process::exit(0);
+    }
+
     println!("  [Guardrail OS] Tier-2 PEP daemon is running (awaiting integration).");
     println!("  [Guardrail OS] To integrate, expose a socket/IPC interface to the Python kernel.");
     // Keep the daemon alive; do not exit after self-tests.

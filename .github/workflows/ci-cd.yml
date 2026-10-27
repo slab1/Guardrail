@@ -76,6 +76,9 @@ jobs:
           components: rustc, cargo
 
       - name: Run Native PEP Regression Tests
+        env:
+          GUARDRAIL_PEP_SECRET: "ci_pipeline_secure_random_key_987654321"
+          PEP_SELF_TEST_ONLY: "1"
         run: |
           rustc --version
           # Compile and run the hardened Tier-2 PEP self-tests
