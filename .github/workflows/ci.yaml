@@ -110,6 +110,8 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build and Start Services
+        env:
+          GUARDRAIL_PEP_SECRET: "ci_pipeline_secure_random_key_987654321"
         run: docker compose up -d --build
 
       - name: Wait for Kernel Health Check

@@ -13,7 +13,7 @@ services:
     environment:
       - PORT=8888
       - ENVIRONMENT=production
-      - GUARDRAIL_PEP_SECRET=${GUARDRAIL_PEP_SECRET}
+      - GUARDRAIL_PEP_SECRET=${GUARDRAIL_PEP_SECRET:-ci_docker_compose_secret_key_987654321}
     volumes:
       - ./data:/app/data
     healthcheck:
