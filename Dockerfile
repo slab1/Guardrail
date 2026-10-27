@@ -75,7 +75,6 @@ CMD ["sh", "-c", "\
       exit 1; \
       ;; \
   esac; \
-  /usr/local/bin/guardrail-pep-daemon & python3 app.py & \
-  # Keep container alive while daemon runs \
-  sleep infinity \
+  /usr/local/bin/guardrail-pep-daemon & \
+  exec python3 app.py \
 "]
