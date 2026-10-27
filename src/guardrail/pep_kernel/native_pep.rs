@@ -304,7 +304,6 @@ fn main() {
             std::process::exit(1);
         },
     };
-    };
     let mut pep = NativeDataPlanePEP::new(secret);
 
     let mut valid_token = CapabilityToken {
