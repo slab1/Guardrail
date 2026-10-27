@@ -5,12 +5,11 @@ FROM node:22-alpine AS frontend-builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+COPY firebase-applet-config.json firebase-blueprint.json ./
 RUN npm ci
 
 COPY tsconfig.json tsconfig.node.json vite.config.ts postcss.config.js tailwind.config.js index.html ./
 COPY src ./src
-COPY firebase-applet-config.json firebase-blueprint.json ./
-
 RUN npm run build
 
 # =========================================================
@@ -21,8 +20,7 @@ WORKDIR /app
 
 COPY src/guardrail/pep_kernel/native_pep.rs ./native_pep.rs
 # Compile the native Tier-2 Data Plane PEP daemon with release optimizations
-RUN rustc -O native_pep.rs -o guardrail-pep-daemon && \
-    ./guardrail-pep-daemon
+RUN rustc -O native_pep.rs -o guardrail-pep-daemon
 
 # =========================================================
 # Stage 3: Production Python Kernel Engine (FastAPI + Z3 + Native PEP)
@@ -33,7 +31,8 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8888 \
-    GUARDRAIL_ENV=production
+    GUARDRAIL_ENV=production \
+    GUARDRAIL_PEP_SECRET=default_secret_1234567890
 
 # Install system dependencies including libseccomp
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -61,4 +60,5 @@ EXPOSE 8888
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8888/api/kernel/state || exit 1
 
-CMD ["python3", "app.py"]
+# Start the native PEP daemon as a background process before starting the Python app
+CMD ["sh", "-c", "/usr/local/bin/guardrail-pep-daemon & python3 app.py"]
