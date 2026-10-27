@@ -13,6 +13,7 @@ services:
     environment:
       - PORT=8888
       - ENVIRONMENT=production
+      - GUARDRAIL_PEP_SECRET=${GUARDRAIL_PEP_SECRET}
     volumes:
       - ./data:/app/data
     healthcheck:

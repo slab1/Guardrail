@@ -13,29 +13,25 @@ COPY src ./src
 RUN npm run build
 
 # =========================================================
-# Stage 2: Build Native Rust PEP Engine
+# Stage 2: Build Native Rust PEP Engine & Run Security Invariant Tests
 # =========================================================
 FROM rust:1.80-slim AS rust-builder
 WORKDIR /app
 
 COPY src/guardrail/pep_kernel/native_pep.rs ./native_pep.rs
-# Compile with release optimizations and minimal size
-RUN rustc -O native_pep.rs -o guardrail-pep-daemon
+# Compile the native Tier-2 Data Plane PEP daemon with release optimizations
+RUN rustc -O native_pep.rs -o guardrail-pep-daemon && \
+    ./guardrail-pep-daemon
 
 # =========================================================
-# Stage 3: Production Python Kernel Engine
+# Stage 3: Production Python Kernel Engine (FastAPI + Z3 + Native PEP)
 # =========================================================
 FROM python:3.10-slim AS runner
 WORKDIR /app
-
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8888 \
     GUARDRAIL_ENV=production
-
-# NOTE: GUARDRAIL_PEP_SECRET MUST be provided at runtime via --env or Docker secret
-# The image will refuse to start if the secret is missing or is a known default.
-# This prevents the hard-coded default signing key blocker.
 
 # Install system dependencies including libseccomp
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -63,7 +59,6 @@ EXPOSE 8888
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8888/api/kernel/state || exit 1
 
-# Validate required secret at container start, then run both processes
 CMD ["sh", "-c", "\
   if [ -z \"$GUARDRAIL_PEP_SECRET\" ]; then \
     echo 'FATAL: GUARDRAIL_PEP_SECRET environment variable is required in production'; \
@@ -75,6 +70,7 @@ CMD ["sh", "-c", "\
       exit 1; \
       ;; \
   esac; \
-  /usr/local/bin/guardrail-pep-daemon & \
-  python3 app.py \
+  /usr/local/bin/guardrail-pep-daemon & python3 app.py & \
+  # Keep container alive while daemon runs \
+  sleep infinity \
 "]

@@ -286,12 +286,24 @@ fn main() {
     println!("[Guardrail OS] Running self-test suite...");
 
     let secret = match std::env::var("GUARDRAIL_PEP_SECRET") {
-        Ok(val) => val.into_bytes(),
-        Err(_) => {
-            // Dynamic ephemeral key for test suite execution without hardcoded static credentials
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-            crypto::sha256(&now.to_be_bytes()).to_vec()
+        Ok(val) => {
+            // Validate that the secret is not a known insecure default
+            let insecure_patterns = [
+                "default_secret_",
+                "test_secret_",
+                "changeme",
+            ];
+            if insecure_patterns.iter().any(|p| val.starts_with(p)) {
+                eprintln!("ERROR: GUARDRAIL_PEP_SECRET contains an insecure default value");
+                std::process::exit(1);
+            }
+            val.into_bytes()
         }
+        Err(_) => {
+            eprintln!("ERROR: GUARDRAIL_PEP_SECRET environment variable is required");
+            std::process::exit(1);
+        },
+    };
     };
     let mut pep = NativeDataPlanePEP::new(secret);
 
