@@ -80,11 +80,7 @@ jobs:
           rustc --version
           # Compile and run the hardened Tier-2 PEP self-tests
           rustc src/guardrail/pep_kernel/native_pep.rs -o native-pep-test
-          timeout 10s ./native-pep-test || true
-          # Verify all 5 security invariants are printed
           ./native-pep-test
-        env:
-          GUARDRAIL_PEP_SECRET: test_secret_1234567890
 
   # ---------------------------------------------------------------
   # Job 3: Security & SAST Audit (Static Code Analysis)

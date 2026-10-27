@@ -13,17 +13,17 @@ COPY src ./src
 RUN npm run build
 
 # =========================================================
-# Stage 2: Build Native Rust PEP Engine & Run Security Invariant Tests
+# Stage 2: Build Native Rust PEP Engine
 # =========================================================
 FROM rust:1.80-slim AS rust-builder
 WORKDIR /app
 
 COPY src/guardrail/pep_kernel/native_pep.rs ./native_pep.rs
-# Compile the native Tier-2 Data Plane PEP daemon with release optimizations
+# Compile with release optimizations and minimal size
 RUN rustc -O native_pep.rs -o guardrail-pep-daemon
 
 # =========================================================
-# Stage 3: Production Python Kernel Engine (FastAPI + Z3 + Native PEP)
+# Stage 3: Production Python Kernel Engine
 # =========================================================
 FROM python:3.10-slim AS runner
 WORKDIR /app
@@ -31,8 +31,11 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8888 \
-    GUARDRAIL_ENV=production \
-    GUARDRAIL_PEP_SECRET=default_secret_1234567890
+    GUARDRAIL_ENV=production
+
+# NOTE: GUARDRAIL_PEP_SECRET MUST be provided at runtime via --env or Docker secret
+# The image will refuse to start if the secret is missing or is a known default.
+# This prevents the hard-coded default signing key blocker.
 
 # Install system dependencies including libseccomp
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -60,5 +63,18 @@ EXPOSE 8888
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8888/api/kernel/state || exit 1
 
-# Start the native PEP daemon as a background process before starting the Python app
-CMD ["sh", "-c", "/usr/local/bin/guardrail-pep-daemon & python3 app.py"]
+# Validate required secret at container start, then run both processes
+CMD ["sh", "-c", "\
+  if [ -z \"$GUARDRAIL_PEP_SECRET\" ]; then \
+    echo 'FATAL: GUARDRAIL_PEP_SECRET environment variable is required in production'; \
+    exit 1; \
+  fi; \
+  case \"$GUARDRAIL_PEP_SECRET\" in \
+    default_secret_1234567890|test_secret*|changeme*) \
+      echo 'FATAL: GUARDRAIL_PEP_SECRET is set to a known insecure default value'; \
+      exit 1; \
+      ;; \
+  esac; \
+  /usr/local/bin/guardrail-pep-daemon & \
+  python3 app.py \
+"]

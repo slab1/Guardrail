@@ -351,4 +351,11 @@ fn main() {
     println!("  [✓] Resource prefix escape (/workspace-evil) blocked");
 
     println!("[Guardrail OS] All native security regression tests PASSED.");
+    println!("  [Guardrail OS] Tier-2 PEP daemon is running (awaiting integration).");
+    println!("  [Guardrail OS] To integrate, expose a socket/IPC interface to the Python kernel.");
+    // Keep the daemon alive; do not exit after self-tests.
+    // This prevents the process from terminating immediately after validation.
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
 }
