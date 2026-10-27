@@ -1,4 +1,6 @@
 [
+  "tests/test_data_plane_pep.py::test_authenticated_ipc_handshake_and_tamper_defense",
+  "tests/test_data_plane_pep.py::test_authoritative_revocation_direct_sqlite",
   "tests/test_data_plane_pep.py::test_canonical_resource_boundary_validation",
   "tests/test_data_plane_pep.py::test_data_plane_pep_forgery_signature_mismatch",
   "tests/test_data_plane_pep.py::test_data_plane_pep_future_clock_skew_rejected",
@@ -12,6 +14,7 @@
   "tests/test_data_plane_pep.py::test_durable_revocation_persistence",
   "tests/test_data_plane_pep.py::test_fail_closed_native_pep_mode",
   "tests/test_data_plane_pep.py::test_insecure_default_secret_rejection",
+  "tests/test_data_plane_pep.py::test_revocation_store_fail_closed",
   "tests/test_security_remediations.py::test_consent_blocked_when_pending_semantic",
   "tests/test_security_remediations.py::test_unauthenticated_request_raises_in_production",
   "tests/test_verifier_properties.py::test_cache_performance",

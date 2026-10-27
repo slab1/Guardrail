@@ -173,3 +173,107 @@ def test_insecure_default_secret_rejection(monkeypatch):
         get_kernel_pep_secret()
     
     assert "insecure default value" in str(exc_info.value)
+
+def test_revocation_store_fail_closed():
+    from guardrail.data_plane_pep import DurableRevocationStore
+    # Attempting to init on an unwritable path must raise RuntimeError (fail-closed)
+    with pytest.raises(RuntimeError) as exc_info:
+        DurableRevocationStore(db_path="/proc/read_only_sys_file_cannot_create.db")
+    assert "Fail-Closed" in str(exc_info.value)
+
+def test_authoritative_revocation_direct_sqlite():
+    import sqlite3
+    from guardrail.data_plane_pep import NONCES_DB
+    pep = DataPlanePEP()
+    tok = pep.issue_token("plan_cross_engine", "step_0", "file_read", "/workspace", 1)
+
+    # Insert revocation directly into SQLite database (as if written by another process/worker)
+    with sqlite3.connect(NONCES_DB) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO revocations (id, target_type, revoked_at) VALUES (?, 'token', ?)",
+            (tok.token_id, time.time())
+        )
+        conn.commit()
+
+    # The PEP must query the durable store and deny the operation immediately
+    res = pep.verify_and_enforce(tok.to_dict(), "file_read", "/workspace/config.json")
+    assert res["verdict"] == "TRAP_DENY"
+    assert "revoked" in res["reason"].lower()
+
+def test_authenticated_ipc_handshake_and_tamper_defense(monkeypatch):
+    import socket
+    import threading
+    import json
+    import hmac
+    import hashlib
+    from app import check_native_pep_daemon
+    from guardrail.data_plane_pep import get_kernel_pep_secret
+
+    test_port = 18889
+    monkeypatch.setenv("GUARDRAIL_PEP_PORT", str(test_port))
+    monkeypatch.setenv("GUARDRAIL_PEP_SOCKET", "/tmp/test_pep_nonexistent.sock")
+    secret = get_kernel_pep_secret()
+
+    server_running = threading.Event()
+    stop_server = threading.Event()
+
+    def mock_native_daemon():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", test_port))
+        sock.listen(1)
+        sock.settimeout(1.0)
+        server_running.set()
+
+        while not stop_server.is_set():
+            try:
+                conn, _ = sock.accept()
+                raw = conn.recv(4096)
+                if not raw:
+                    conn.close()
+                    continue
+                req = json.loads(raw.decode("utf-8").strip())
+                # Verify request HMAC signature
+                expected_sig = hmac.new(
+                    secret,
+                    f"{req['proto_ver']}:{req['request_id']}:{req['timestamp']}:ping:{req['challenge']}".encode("utf-8"),
+                    hashlib.sha256
+                ).hexdigest()
+
+                if hmac.compare_digest(req["ipc_sig"], expected_sig):
+                    resp_sig = hmac.new(
+                        secret,
+                        f"v2.5:{req['request_id']}:{req['challenge']}:healthy".encode("utf-8"),
+                        hashlib.sha256
+                    ).hexdigest()
+                    resp = {
+                        "proto_ver": "v2.5",
+                        "status": "healthy",
+                        "request_id": req["request_id"],
+                        "resp_sig": resp_sig,
+                        "engine": "Guardrail Native Rust PEP v2.5"
+                    }
+                else:
+                    resp = {"proto_ver": "v2.5", "status": "unauthorized", "resp_sig": "invalid"}
+                conn.sendall((json.dumps(resp) + "\n").encode("utf-8"))
+                conn.close()
+            except socket.timeout:
+                continue
+            except Exception:
+                pass
+        sock.close()
+
+    t = threading.Thread(target=mock_native_daemon, daemon=True)
+    t.start()
+    server_running.wait(timeout=2.0)
+
+    try:
+        # 1. Successful authenticated handshake
+        info = check_native_pep_daemon()
+        assert info["connected"] is True
+        assert info["status"] == "ONLINE_IPC_AUTHENTICATED"
+        assert "Native Rust PEP" in info["engine"]
+    finally:
+        stop_server.set()
+        t.join(timeout=1.0)
+

@@ -260,7 +260,8 @@ class DurableRevocationStore:
                 """)
                 conn.commit()
         except Exception as e:
-            print(f"[!] Warning: DurableRevocationStore init failed: {e}")
+            print(f"[!] Critical Error: DurableRevocationStore init failed: {e}")
+            raise RuntimeError(f"DurableRevocationStore init failed (Fail-Closed): {e}")
 
     def revoke(self, target_id: str, target_type: str = "token"):
         if not target_id:
@@ -268,13 +269,27 @@ class DurableRevocationStore:
         with self._lock:
             try:
                 with sqlite3.connect(self.db_path, timeout=2.0) as conn:
+                    conn.execute("PRAGMA journal_mode=WAL;")
                     conn.execute(
                         "INSERT OR REPLACE INTO revocations (id, target_type, revoked_at) VALUES (?, ?, ?)",
                         (target_id, target_type, time.time())
                     )
                     conn.commit()
             except Exception as e:
-                print(f"[!] Warning: DurableRevocationStore write failed: {e}")
+                print(f"[!] Critical Error: DurableRevocationStore write failed: {e}")
+                raise RuntimeError(f"DurableRevocationStore write failed (Fail-Closed): {e}")
+
+    def is_revoked(self, target_id: str) -> bool:
+        if not target_id:
+            return False
+        try:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT 1 FROM revocations WHERE id = ? LIMIT 1", (target_id,))
+                return cur.fetchone() is not None
+        except Exception as e:
+            print(f"[!] Critical Error: DurableRevocationStore query failed: {e}")
+            raise RuntimeError(f"DurableRevocationStore query failed (Fail-Closed): {e}")
 
     def load_all(self) -> Tuple[set, set]:
         tokens, plans = set(), set()
@@ -287,8 +302,9 @@ class DurableRevocationStore:
                         plans.add(row[0])
                     else:
                         tokens.add(row[0])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[!] Critical Error: DurableRevocationStore load_all failed: {e}")
+            raise RuntimeError(f"DurableRevocationStore load_all failed (Fail-Closed): {e}")
         return tokens, plans
 
 
@@ -302,8 +318,9 @@ def verify_via_native_rust_pep(
     secret_key: Optional[bytes] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Dispatches token verification request to the Native Rust PEP daemon over Unix socket or TCP IPC.
+    Dispatches token verification request to the Native Rust PEP daemon over Unix domain socket or TCP IPC.
     Includes protocol version v2.5, request ID, timestamp, and HMAC-SHA256 signature authentication.
+    Verifies cryptographic response signature from daemon before returning (bilateral authentication).
     """
     import socket
     import json
@@ -313,56 +330,102 @@ def verify_via_native_rust_pep(
     req_id = f"req_{uuid.uuid4().hex[:12]}"
     ts = time.time()
 
-    token_id = token_data.get("token_id", "")
-    plan_id = token_data.get("plan_id", "")
-    step_id = token_data.get("step_id", "")
-    action_type = token_data.get("action_type", "")
-    resource = token_data.get("resource", "")
-    autonomy_level = token_data.get("autonomy_level", 0)
-    issued_at = token_data.get("issued_at", 0)
-    expires_at = token_data.get("expires_at", 0)
-    nonce = token_data.get("nonce", "")
+    token_fields = {
+        "token_id": str(token_data.get("token_id", "")),
+        "plan_id": str(token_data.get("plan_id", "")),
+        "step_id": str(token_data.get("step_id", "")),
+        "action_type": str(token_data.get("action_type", "")),
+        "resource": str(token_data.get("resource", "")),
+        "autonomy_level": int(token_data.get("autonomy_level", 0)),
+        "issued_at": int(token_data.get("issued_at", 0)),
+        "expires_at": int(token_data.get("expires_at", 0)),
+        "nonce": str(token_data.get("nonce", "")),
+        "signature": str(token_data.get("signature", ""))
+    }
 
-    canonical_token = f"{token_id}:{plan_id}:{step_id}:{action_type}:{resource}:{autonomy_level}:{issued_at}:{expires_at}:{nonce}"
+    canonical_token = (
+        f"{token_fields['token_id']}:{token_fields['plan_id']}:{token_fields['step_id']}:"
+        f"{token_fields['action_type']}:{token_fields['resource']}:{token_fields['autonomy_level']}:"
+        f"{token_fields['issued_at']}:{token_fields['expires_at']}:{token_fields['nonce']}"
+    )
     ipc_canonical = f"{proto_ver}:{req_id}:{ts}:{requested_action}:{target_resource}:{canonical_token}".encode("utf-8")
     ipc_sig = hmac.new(sec_key, ipc_canonical, hashlib.sha256).hexdigest()
 
-    payload = dict(token_data)
-    payload["proto_ver"] = proto_ver
-    payload["request_id"] = req_id
-    payload["timestamp"] = ts
-    payload["requested_action"] = requested_action
-    payload["target_resource"] = target_resource
-    payload["is_revoked"] = "true" if is_revoked else "false"
-    payload["ipc_sig"] = ipc_sig
+    payload = {
+        "proto_ver": proto_ver,
+        "request_id": req_id,
+        "timestamp": ts,
+        "requested_action": requested_action,
+        "target_resource": target_resource,
+        "token_data": token_fields,
+        "is_revoked": bool(is_revoked),
+        "ipc_sig": ipc_sig
+    }
 
-    unix_socket_path = os.environ.get("GUARDRAIL_PEP_SOCKET", "/run/guardrail/pep.sock")
+    candidate_sockets = []
+    env_socket = os.environ.get("GUARDRAIL_PEP_SOCKET")
+    if env_socket:
+        candidate_sockets.append(env_socket)
+    candidate_sockets.extend(["/run/guardrail/pep.sock", "/tmp/guardrail_pep.sock"])
 
-    try:
-        if os.path.exists(unix_socket_path):
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.settimeout(0.5)
-            s.connect(unix_socket_path)
-        else:
+    connected_socket = None
+    for sock_path in candidate_sockets:
+        if os.path.exists(sock_path):
+            try:
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                s.settimeout(0.5)
+                s.connect(sock_path)
+                connected_socket = s
+                break
+            except Exception:
+                pass
+
+    if connected_socket is None:
+        try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(0.5)
             s.connect((host, port))
+            connected_socket = s
+        except Exception:
+            return None
 
-        s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+    try:
+        connected_socket.sendall((json.dumps(payload) + "\n").encode("utf-8"))
 
         response_bytes = b""
-        while True:
-            chunk = s.recv(1024)
+        while len(response_bytes) < 65536:
+            chunk = connected_socket.recv(1024)
             if not chunk:
                 break
             response_bytes += chunk
             if b"\n" in response_bytes:
                 break
-        s.close()
+        connected_socket.close()
 
         if response_bytes:
-            return json.loads(response_bytes.decode("utf-8").strip())
+            resp_dict = json.loads(response_bytes.decode("utf-8").strip())
+            
+            # Bilateral response authentication
+            expected_resp_sig = hmac.new(
+                sec_key,
+                f"{resp_dict.get('proto_ver', 'v2.5')}:{req_id}:{resp_dict.get('verdict', '')}:{resp_dict.get('reason', '')}".encode("utf-8"),
+                hashlib.sha256
+            ).hexdigest()
+
+            if not hmac.compare_digest(resp_dict.get("resp_sig", "").lower(), expected_resp_sig.lower()):
+                return {
+                    "verdict": "TRAP_DENY",
+                    "reason": "CRITICAL: Native Rust PEP daemon response signature verification failed (Untrusted IPC response)",
+                    "syscall_trap": "SIGSYS",
+                    "latency_ms": 0.01,
+                    "tier": "Tier-2 Native Rust PEP Daemon (Untrusted)"
+                }
+            return resp_dict
     except Exception:
+        try:
+            connected_socket.close()
+        except Exception:
+            pass
         return None
     return None
 
@@ -504,8 +567,24 @@ class DataPlanePEP:
         token_id = token_data.get("token_id", "")
         plan_id = token_data.get("plan_id", "")
 
-        # 0. Revocation Check (Fail-Closed)
-        is_revoked = (token_id and token_id in self.revoked_tokens) or (plan_id and plan_id in self.revoked_plans)
+        # 0. Authoritative Durable Revocation Check (Fail-Closed)
+        is_revoked = False
+        try:
+            if (token_id and token_id in self.revoked_tokens) or (plan_id and plan_id in self.revoked_plans):
+                is_revoked = True
+            elif (token_id and self.revocation_store.is_revoked(token_id)) or (plan_id and self.revocation_store.is_revoked(plan_id)):
+                is_revoked = True
+        except Exception as e:
+            latency = (time.perf_counter() - t0) * 1000
+            self._record_trap("REVOCATION_STORE_ERROR", requested_action, target_resource, f"Revocation store access error: {e}")
+            return {
+                "verdict": "TRAP_DENY",
+                "reason": f"Durable revocation store failure (Fail-Closed): {e}",
+                "syscall_trap": "SIGSYS",
+                "latency_ms": latency,
+                "tier": "Tier-2 Data Plane (Hardware-Adjacent PEP)"
+            }
+
         if is_revoked:
             latency = (time.perf_counter() - t0) * 1000
             self._record_trap("REVOKED_TOKEN", requested_action, target_resource, "Capability token or bound plan has been revoked")
@@ -550,18 +629,6 @@ class DataPlanePEP:
         expires_at = token_data.get("expires_at", 0)
         nonce = token_data.get("nonce", "")
         provided_sig = token_data.get("signature", "")
-
-        # 0. Revocation Check (Fail-Closed)
-        if (token_id and token_id in self.revoked_tokens) or (plan_id and plan_id in self.revoked_plans):
-            latency = (time.perf_counter() - t0) * 1000
-            self._record_trap("REVOKED_TOKEN", requested_action, target_resource, "Capability token or bound plan has been revoked")
-            return {
-                "verdict": "TRAP_DENY",
-                "reason": "Capability token or bound plan has been revoked by security policy",
-                "syscall_trap": "SIGSYS",
-                "latency_ms": latency,
-                "tier": "Tier-2 Data Plane (Hardware-Adjacent PEP)"
-            }
 
         # 1. Cryptographic Signature Verification (Fail-Closed)
         if not provided_sig or provided_sig.startswith("placeholder"):

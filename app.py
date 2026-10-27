@@ -132,30 +132,31 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
     # Single Process Supervision & Bounded Backoff Startup Healthcheck
-    require_native = os.environ.get("REQUIRE_NATIVE_PEP", "").lower() in ["1", "true", "yes"] or \
-                     os.environ.get("GUARDRAIL_USE_NATIVE_PEP", "").lower() in ["1", "true", "yes"] or \
-                     os.environ.get("GUARDRAIL_ENV", "").lower() in ["production", "prod"]
+    is_prod = os.environ.get("GUARDRAIL_ENV", "").lower() in ["production", "prod"]
+    require_strict = os.environ.get("REQUIRE_NATIVE_PEP", "").lower() in ["1", "true", "yes"] or is_prod
 
-    if require_native:
-        print("[+] Guardrail OS Kernel initiating Native PEP daemon readiness verification...")
-        start_time = time.time()
-        max_wait_seconds = 30.0
-        backoff = 0.5
-        daemon_ready = False
+    print("[+] Guardrail OS Kernel checking Native PEP daemon readiness...")
+    start_time = time.time()
+    max_wait_seconds = 30.0 if require_strict else 3.0
+    backoff = 0.3
+    daemon_ready = False
 
-        while time.time() - start_time < max_wait_seconds:
-            info = check_native_pep_daemon()
-            if info.get("connected"):
-                print(f"[+] Native Tier-2 Rust PEP daemon connected & verified ({info.get('engine')})")
-                daemon_ready = True
-                break
-            await asyncio.sleep(backoff)
-            backoff = min(2.0, backoff * 1.5)
+    while time.time() - start_time < max_wait_seconds:
+        info = check_native_pep_daemon()
+        if info.get("connected"):
+            print(f"[+] Native Tier-2 Rust PEP daemon connected & verified ({info.get('engine')})")
+            daemon_ready = True
+            break
+        await asyncio.sleep(backoff)
+        backoff = min(1.0, backoff * 1.5)
 
-        if not daemon_ready:
-            print("[!] CRITICAL FATAL ERROR: Native Rust PEP daemon readiness check failed after 30 seconds.")
+    if not daemon_ready:
+        if require_strict:
+            print("[!] CRITICAL FATAL ERROR: Native Rust PEP daemon readiness check failed after timeout.")
             print("[!] Refusing to start FastAPI application without required native security enforcement.")
             sys.exit(1)
+        else:
+            print("[!] Warning: Native PEP daemon unreachable in dev environment; falling back to Python PEP fastpath.")
 
     yield
 
@@ -758,20 +759,106 @@ async def reset_trust(
     return {"status": "success", "trust_score": request.score, "reset_by": principal.user_id}
 
 def check_native_pep_daemon() -> Dict[str, Any]:
+    """
+    Authenticated readiness and healthcheck probe for Native Tier-2 Rust PEP daemon.
+    Uses Unix domain socket (/run/guardrail/pep.sock) with loopback TCP fallback.
+    Performs cryptographic challenge-response HMAC handshake to verify daemon authenticity.
+    """
     import socket
+    import secrets
+    import hmac
+    import hashlib
+    from guardrail.data_plane_pep import get_kernel_pep_secret
+
+    candidate_sockets = []
+    env_sock = os.environ.get("GUARDRAIL_PEP_SOCKET")
+    if env_sock:
+        candidate_sockets.append(env_sock)
+    candidate_sockets.extend(["/run/guardrail/pep.sock", "/tmp/guardrail_pep.sock"])
+
     port = int(os.environ.get("GUARDRAIL_PEP_PORT", "8889"))
+    host = os.environ.get("GUARDRAIL_PEP_HOST", "127.0.0.1")
+
+    s = None
+    for sock_path in candidate_sockets:
+        if os.path.exists(sock_path):
+            try:
+                sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                sock.settimeout(0.3)
+                sock.connect(sock_path)
+                s = sock
+                break
+            except Exception:
+                pass
+
+    if s is None:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.3)
+            sock.connect((host, port))
+            s = sock
+        except Exception:
+            return {"connected": False, "status": "STANDALONE_FALLBACK", "engine": "Python Hardware-Adjacent PEP"}
+
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.2)
-        s.connect(("127.0.0.1", port))
-        s.sendall(b'{"type":"ping"}\n')
-        buf = s.recv(512)
+        secret = get_kernel_pep_secret()
+        proto_ver = "v2.5"
+        req_id = f"ping_{secrets.token_hex(6)}"
+        ts = time.time()
+        challenge = secrets.token_hex(16)
+
+        ipc_canonical = f"{proto_ver}:{req_id}:{ts}:ping:{challenge}".encode("utf-8")
+        ipc_sig = hmac.new(secret, ipc_canonical, hashlib.sha256).hexdigest()
+
+        ping_req = {
+            "proto_ver": proto_ver,
+            "type": "ping",
+            "request_id": req_id,
+            "timestamp": ts,
+            "challenge": challenge,
+            "ipc_sig": ipc_sig
+        }
+        s.sendall((json.dumps(ping_req) + "\n").encode("utf-8"))
+
+        buf = b""
+        while len(buf) < 4096:
+            chunk = s.recv(1024)
+            if not chunk:
+                break
+            buf += chunk
+            if b"\n" in buf:
+                break
         s.close()
-        if buf and b"healthy" in buf:
-            return {"connected": True, "status": "ONLINE_IPC_SOCKET", "engine": "Guardrail Native Rust PEP v2.5"}
-    except Exception:
-        pass
+
+        if buf:
+            resp = json.loads(buf.decode("utf-8").strip())
+            if resp.get("status") == "healthy":
+                expected_resp_sig = hmac.new(
+                    secret,
+                    f"v2.5:{req_id}:{challenge}:healthy".encode("utf-8"),
+                    hashlib.sha256
+                ).hexdigest()
+                if hmac.compare_digest(resp.get("resp_sig", "").lower(), expected_resp_sig.lower()):
+                    return {
+                        "connected": True,
+                        "status": "ONLINE_IPC_AUTHENTICATED",
+                        "engine": resp.get("engine", "Guardrail Native Rust PEP v2.5")
+                    }
+                else:
+                    return {
+                        "connected": False,
+                        "status": "AUTH_FAILED",
+                        "engine": "Python Hardware-Adjacent PEP (Untrusted Daemon)"
+                    }
+    except Exception as e:
+        try:
+            s.close()
+        except Exception:
+            pass
+        return {"connected": False, "status": f"ERROR: {e}", "engine": "Python Hardware-Adjacent PEP"}
+
     return {"connected": False, "status": "STANDALONE_FALLBACK", "engine": "Python Hardware-Adjacent PEP"}
+
 
 # Public Read-Only Health & Telemetry Probes
 @app.get("/api/kernel/state", tags=["Public Monitoring"])

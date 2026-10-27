@@ -1,11 +1,13 @@
 // Guardrail OS - Native Tier-2 Data Plane PEP Daemon (Rust Reference Implementation)
 // Invariant: Non-bypassable, hardware-adjacent capability verification with zero GC pauses.
-// Compilation: rustc --release native_pep.rs -o guardrail-pep-daemon
-// Features: Constant-time HMAC-SHA256 cryptographic verification, Linear token nonces, Canonical resource boundaries (<0.01ms).
+// Features: Constant-time HMAC-SHA256 cryptographic verification, Durable SQLite WAL replay protection,
+//           Authoritative durable revocation queries, Unix domain socket IPC with peer credentials,
+//           Strict serde JSON parsing, Canonical resource boundaries (<0.01ms).
 
-use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
+use serde::{Deserialize, Serialize};
 
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct CapabilityToken {
     pub token_id: String,
     pub plan_id: String,
@@ -19,8 +21,52 @@ pub struct CapabilityToken {
     pub signature: String,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct IpcVerifyRequest {
+    pub proto_ver: String,
+    pub request_id: String,
+    pub timestamp: f64,
+    pub requested_action: String,
+    pub target_resource: String,
+    pub token_data: CapabilityToken,
+    #[serde(default)]
+    pub is_revoked: bool,
+    pub ipc_sig: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct IpcPingRequest {
+    pub proto_ver: String,
+    #[serde(rename = "type")]
+    pub req_type: String,
+    pub request_id: String,
+    pub timestamp: f64,
+    pub challenge: String,
+    pub ipc_sig: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct IpcResponse {
+    pub proto_ver: String,
+    pub verdict: String,
+    pub reason: String,
+    pub latency_ms: f64,
+    pub tier: String,
+    pub request_id: String,
+    pub resp_sig: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct IpcPingResponse {
+    pub proto_ver: String,
+    pub status: String,
+    pub request_id: String,
+    pub resp_sig: String,
+    pub engine: String,
+}
+
 /// Zero-dependency FIPS 180-2 SHA-256 and RFC 2104 HMAC-SHA256 engine
-mod crypto {
+pub mod crypto {
     fn right_rotate(value: u32, amount: u32) -> u32 {
         (value >> amount) | (value << (32 - amount))
     }
@@ -157,16 +203,43 @@ mod crypto {
 }
 
 pub struct NativeDataPlanePEP {
-    secret_key: Vec<u8>,
-    consumed_nonces: HashSet<String>,
+    pub secret_key: Vec<u8>,
+    pub db_conn: rusqlite::Connection,
 }
 
 impl NativeDataPlanePEP {
-    pub fn new(secret_key: Vec<u8>) -> Self {
-        NativeDataPlanePEP {
-            secret_key,
-            consumed_nonces: HashSet::new(),
+    pub fn new(secret_key: Vec<u8>, db_path: &str) -> Result<Self, String> {
+        if let Some(parent) = std::path::Path::new(db_path).parent() {
+            if !parent.as_os_str().is_empty() {
+                let _ = std::fs::create_dir_all(parent);
+            }
         }
+
+        let conn = rusqlite::Connection::open(db_path)
+            .map_err(|e| format!("Failed to open SQLite database at {}: {}", db_path, e))?;
+
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=NORMAL;
+             CREATE TABLE IF NOT EXISTS consumed_nonces (
+                 nonce TEXT PRIMARY KEY,
+                 token_id TEXT,
+                 plan_id TEXT,
+                 consumed_at REAL,
+                 expires_at REAL
+             );
+             CREATE INDEX IF NOT EXISTS idx_expires ON consumed_nonces(expires_at);
+             CREATE TABLE IF NOT EXISTS revocations (
+                 id TEXT PRIMARY KEY,
+                 target_type TEXT,
+                 revoked_at REAL
+             );"
+        ).map_err(|e| format!("Failed to initialize SQLite schema: {}", e))?;
+
+        Ok(NativeDataPlanePEP {
+            secret_key,
+            db_conn: conn,
+        })
     }
 
     /// Canonical payload generator matching Python DataPlanePEP & TypeScript TokenService
@@ -193,9 +266,10 @@ impl NativeDataPlanePEP {
 
     /// Hardware-adjacent policy enforcement gate: Sub-microsecond execution (<0.01ms)
     /// Enforces:
+    /// 0. Authoritative check against durable SQLite WAL revocations table
     /// 1. Cryptographic HMAC authenticity (Constant-time check)
     /// 2. Expiration validity
-    /// 3. Nonce linearity (Anti-replay)
+    /// 3. Nonce linearity & anti-replay via atomic SQLite WAL primary key insert
     /// 4. Action matching
     /// 5. Canonical resource boundary checking (Zero prefix escapes)
     pub fn verify_and_enforce(
@@ -205,6 +279,25 @@ impl NativeDataPlanePEP {
         target_resource: &str,
     ) -> Result<u64, String> {
         let start = SystemTime::now();
+
+        // 0. Authoritative Durable Revocation Check against SQLite WAL
+        let is_revoked: Result<bool, rusqlite::Error> = self.db_conn.query_row(
+            "SELECT 1 FROM revocations WHERE id = ?1 OR id = ?2 LIMIT 1",
+            rusqlite::params![token.token_id, token.plan_id],
+            |_| Ok(true),
+        );
+
+        match is_revoked {
+            Ok(true) => {
+                return Err("TRAP_DENY: Capability token or bound plan has been revoked by security policy".to_string());
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(e) => {
+                // Fail-closed if durable revocation store is inaccessible
+                return Err(format!("TRAP_DENY: Authoritative revocation store error (Fail-Closed): {}", e));
+            }
+            _ => {}
+        }
 
         // 1. Cryptographic Signature Verification (MANDATORY FAIL-CLOSED)
         if token.signature.is_empty() || token.signature.starts_with("placeholder") {
@@ -230,12 +323,7 @@ impl NativeDataPlanePEP {
             return Err("TRAP_DENY: Capability token temporal failure (issued_at in future)".to_string());
         }
 
-        // 3. Anti-replay linearity check
-        if self.consumed_nonces.contains(&token.nonce) {
-            return Err("TRAP_DENY: Linearity invariant violated (Nonce already consumed: Replay Attack)".to_string());
-        }
-
-        // 4. Action match check
+        // 3. Action match check
         if token.action_type != requested_action {
             return Err(format!(
                 "TRAP_DENY: Action mismatch (Token granted: {}, Requested: {})",
@@ -243,7 +331,7 @@ impl NativeDataPlanePEP {
             ));
         }
 
-        // 5. Canonical resource boundary check (prevents /workspace-evil prefix escapes)
+        // 4. Canonical resource boundary check (prevents /workspace-evil prefix escapes)
         if !self.is_within_boundary(target_resource, &token.resource) {
             return Err(format!(
                 "TRAP_DENY: Resource escapement detected (Target: {}, Boundary: {})",
@@ -251,8 +339,23 @@ impl NativeDataPlanePEP {
             ));
         }
 
-        // Mark nonce consumed atomically for one-time linear capability
-        self.consumed_nonces.insert(token.nonce.clone());
+        // 5. Atomic Replay Protection (ACID SQLite WAL insert)
+        let now_real = now as f64;
+        let expires_real = token.expires_at as f64;
+        let insert_res = self.db_conn.execute(
+            "INSERT INTO consumed_nonces (nonce, token_id, plan_id, consumed_at, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![token.nonce, token.token_id, token.plan_id, now_real, expires_real],
+        );
+
+        match insert_res {
+            Ok(_) => {}
+            Err(rusqlite::Error::SqliteFailure(err, _)) if err.code == rusqlite::ffi::ErrorCode::ConstraintViolation => {
+                return Err("TRAP_DENY: Linearity invariant violated (Nonce already consumed: Replay Attack)".to_string());
+            }
+            Err(e) => {
+                return Err(format!("TRAP_DENY: Atomic nonce consumption failed in durable store (Fail-Closed): {}", e));
+            }
+        }
 
         let elapsed = start.elapsed().unwrap().as_micros() as u64;
         Ok(elapsed)
@@ -280,6 +383,218 @@ impl NativeDataPlanePEP {
     }
 }
 
+/// Linux SO_PEERCRED verification to ensure caller runs under same UID or root
+#[cfg(target_os = "linux")]
+fn verify_peer_credentials(stream: &std::os::unix::net::UnixStream) -> Result<(), String> {
+    use std::os::unix::io::AsRawFd;
+
+    #[repr(C)]
+    struct Ucred {
+        pid: i32,
+        uid: u32,
+        gid: u32,
+    }
+
+    extern "C" {
+        fn getsockopt(sockfd: i32, level: i32, optname: i32, optval: *mut std::ffi::c_void, optlen: *mut u32) -> i32;
+        fn geteuid() -> u32;
+    }
+
+    let fd = stream.as_raw_fd();
+    let mut ucred = Ucred { pid: 0, uid: 0, gid: 0 };
+    let mut len = std::mem::size_of::<Ucred>() as u32;
+
+    let res = unsafe {
+        getsockopt(fd, 1 /* SOL_SOCKET */, 17 /* SO_PEERCRED */, &mut ucred as *mut _ as *mut std::ffi::c_void, &mut len)
+    };
+
+    if res == 0 {
+        let daemon_uid = unsafe { geteuid() };
+        if ucred.uid != daemon_uid && ucred.uid != 0 {
+            return Err(format!("PEER_CRED_DENIED: Peer UID {} unauthorized (Daemon UID {})", ucred.uid, daemon_uid));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn verify_peer_credentials(_stream: &std::os::unix::net::UnixStream) -> Result<(), String> {
+    Ok(())
+}
+
+fn handle_connection<R: std::io::Read, W: std::io::Write>(
+    reader: &mut std::io::BufReader<R>,
+    writer: &mut W,
+    pep: &mut NativeDataPlanePEP,
+) {
+    use std::io::BufRead;
+    let mut line = String::new();
+
+    while let Ok(bytes) = reader.read_line(&mut line) {
+        if bytes == 0 {
+            break;
+        }
+        if bytes > 65536 {
+            let resp = IpcResponse {
+                proto_ver: "v2.5".to_string(),
+                verdict: "TRAP_DENY".to_string(),
+                reason: "TRAP_DENY: Message exceeds 64KB size limit".to_string(),
+                latency_ms: 0.01,
+                tier: "Tier-2 Native Rust PEP Daemon".to_string(),
+                request_id: "unknown".to_string(),
+                resp_sig: String::new(),
+            };
+            if let Ok(json_bytes) = serde_json::to_vec(&resp) {
+                let _ = writer.write_all(&json_bytes);
+                let _ = writer.write_all(b"\n");
+                let _ = writer.flush();
+            }
+            break;
+        }
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            line.clear();
+            continue;
+        }
+
+        // 1. Authenticated Ping / Readiness Check Handshake
+        if let Ok(ping_req) = serde_json::from_str::<IpcPingRequest>(trimmed) {
+            let expected_sig = crypto::to_hex(&crypto::hmac_sha256(
+                &pep.secret_key,
+                format!("{}:{}:{}:ping:{}", ping_req.proto_ver, ping_req.request_id, ping_req.timestamp, ping_req.challenge).as_bytes(),
+            ));
+
+            if !crypto::constant_time_eq(ping_req.ipc_sig.to_lowercase().as_bytes(), expected_sig.as_bytes()) {
+                let resp = IpcResponse {
+                    proto_ver: "v2.5".to_string(),
+                    verdict: "TRAP_DENY".to_string(),
+                    reason: "TRAP_DENY: Ping HMAC authentication failed".to_string(),
+                    latency_ms: 0.01,
+                    tier: "Tier-2 Native Rust PEP Daemon".to_string(),
+                    request_id: ping_req.request_id,
+                    resp_sig: String::new(),
+                };
+                if let Ok(json_bytes) = serde_json::to_vec(&resp) {
+                    let _ = writer.write_all(&json_bytes);
+                    let _ = writer.write_all(b"\n");
+                    let _ = writer.flush();
+                }
+            } else {
+                let resp_sig = crypto::to_hex(&crypto::hmac_sha256(
+                    &pep.secret_key,
+                    format!("v2.5:{}:{}:healthy", ping_req.request_id, ping_req.challenge).as_bytes(),
+                ));
+                let resp = IpcPingResponse {
+                    proto_ver: "v2.5".to_string(),
+                    status: "healthy".to_string(),
+                    request_id: ping_req.request_id,
+                    resp_sig,
+                    engine: "Guardrail Native Rust PEP v2.5".to_string(),
+                };
+                if let Ok(json_bytes) = serde_json::to_vec(&resp) {
+                    let _ = writer.write_all(&json_bytes);
+                    let _ = writer.write_all(b"\n");
+                    let _ = writer.flush();
+                }
+            }
+            line.clear();
+            continue;
+        }
+
+        // 2. Strict JSON Parse of Capability Verification Request
+        let req: IpcVerifyRequest = match serde_json::from_str(trimmed) {
+            Ok(r) => r,
+            Err(e) => {
+                let resp = IpcResponse {
+                    proto_ver: "v2.5".to_string(),
+                    verdict: "TRAP_DENY".to_string(),
+                    reason: format!("TRAP_DENY: Malformed IPC request JSON: {}", e),
+                    latency_ms: 0.01,
+                    tier: "Tier-2 Native Rust PEP Daemon".to_string(),
+                    request_id: "malformed".to_string(),
+                    resp_sig: String::new(),
+                };
+                if let Ok(json_bytes) = serde_json::to_vec(&resp) {
+                    let _ = writer.write_all(&json_bytes);
+                    let _ = writer.write_all(b"\n");
+                    let _ = writer.flush();
+                }
+                line.clear();
+                continue;
+            }
+        };
+
+        // 3. Mandatory Payload HMAC Signature Authentication
+        let canonical_token = NativeDataPlanePEP::compute_canonical_payload(&req.token_data);
+        let ipc_canonical = format!(
+            "{}:{}:{}:{}:{}:{}",
+            req.proto_ver, req.request_id, req.timestamp, req.requested_action, req.target_resource, canonical_token
+        );
+        let expected_ipc_sig = crypto::to_hex(&crypto::hmac_sha256(&pep.secret_key, ipc_canonical.as_bytes()));
+
+        if !crypto::constant_time_eq(req.ipc_sig.to_lowercase().as_bytes(), expected_ipc_sig.as_bytes()) {
+            let resp = IpcResponse {
+                proto_ver: req.proto_ver.clone(),
+                verdict: "TRAP_DENY".to_string(),
+                reason: "TRAP_DENY: IPC authentication failed (HMAC signature mismatch on local socket)".to_string(),
+                latency_ms: 0.01,
+                tier: "Tier-2 Native Rust PEP Daemon".to_string(),
+                request_id: req.request_id.clone(),
+                resp_sig: String::new(),
+            };
+            if let Ok(json_bytes) = serde_json::to_vec(&resp) {
+                let _ = writer.write_all(&json_bytes);
+                let _ = writer.write_all(b"\n");
+                let _ = writer.flush();
+            }
+            line.clear();
+            continue;
+        }
+
+        // 4. Verification & Enforcement
+        let (verdict, reason, latency_ms) = if req.is_revoked {
+            ("TRAP_DENY".to_string(), "TRAP_DENY: Capability token or bound plan has been revoked by security policy".to_string(), 0.01)
+        } else {
+            match pep.verify_and_enforce(&req.token_data, &req.requested_action, &req.target_resource) {
+                Ok(elapsed_us) => (
+                    "ALLOW".to_string(),
+                    "Cryptographic HMAC token verified by Native Rust PEP Engine".to_string(),
+                    (elapsed_us as f64) / 1000.0,
+                ),
+                Err(err_msg) => (
+                    "TRAP_DENY".to_string(),
+                    err_msg,
+                    0.01,
+                ),
+            }
+        };
+
+        // 5. Signed Response Generation
+        let resp_sig = crypto::to_hex(&crypto::hmac_sha256(
+            &pep.secret_key,
+            format!("{}:{}:{}:{}", req.proto_ver, req.request_id, verdict, reason).as_bytes(),
+        ));
+
+        let resp = IpcResponse {
+            proto_ver: req.proto_ver,
+            verdict,
+            reason,
+            latency_ms,
+            tier: "Tier-2 Native Rust PEP Daemon".to_string(),
+            request_id: req.request_id,
+            resp_sig,
+        };
+
+        if let Ok(json_bytes) = serde_json::to_vec(&resp) {
+            let _ = writer.write_all(&json_bytes);
+            let _ = writer.write_all(b"\n");
+            let _ = writer.flush();
+        }
+        line.clear();
+    }
+}
+
 fn main() {
     println!("[Guardrail OS] Hardened Native Rust Tier-2 PEP Engine initialized.");
     println!("[Guardrail OS] Cryptographic HMAC-SHA256 signature verification active.");
@@ -287,7 +602,6 @@ fn main() {
 
     let secret = match std::env::var("GUARDRAIL_PEP_SECRET") {
         Ok(val) => {
-            // Validate that the secret is not a known insecure default
             let insecure_patterns = [
                 "default_secret_",
                 "test_secret_",
@@ -303,10 +617,21 @@ fn main() {
         Err(_) => {
             eprintln!("ERROR: GUARDRAIL_PEP_SECRET environment variable is required");
             std::process::exit(1);
-        },
+        }
     };
-    let mut pep = NativeDataPlanePEP::new(secret);
 
+    let db_path = std::env::var("GUARDRAIL_DB_PATH")
+        .unwrap_or_else(|_| "data/consumed_nonces.db".to_string());
+
+    let mut pep = match NativeDataPlanePEP::new(secret.clone(), &db_path) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("ERROR: Could not initialize Native PEP database {}: {}", db_path, e);
+            std::process::exit(1);
+        }
+    };
+
+    // Run self-tests
     let mut valid_token = CapabilityToken {
         token_id: "tok_test01".to_string(),
         plan_id: "plan_test".to_string(),
@@ -316,7 +641,7 @@ fn main() {
         autonomy_level: 1,
         issued_at: 1000,
         expires_at: 4102444800, // Year 2100
-        nonce: "nonce_unique_1".to_string(),
+        nonce: format!("nonce_selftest_{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()),
         signature: String::new(),
     };
     valid_token.signature = pep.compute_signature(&valid_token);
@@ -325,9 +650,9 @@ fn main() {
     assert!(pep.verify_and_enforce(&valid_token, "file_read", "/workspace/config.json").is_ok());
     println!("  [✓] Valid capability verified successfully (<0.01ms)");
 
-    // 2. Replay test
+    // 2. Replay test (Linear nonce consumed in SQLite)
     assert!(pep.verify_and_enforce(&valid_token, "file_read", "/workspace/config.json").is_err());
-    println!("  [✓] Replay attack blocked (Linear nonce consumed)");
+    println!("  [✓] Replay attack blocked (Linear nonce consumed in SQLite WAL)");
 
     // 3. Forgery test
     let mut forged_token = CapabilityToken {
@@ -339,13 +664,13 @@ fn main() {
         autonomy_level: 1,
         issued_at: 1000,
         expires_at: 4102444800,
-        nonce: "nonce_unique_2".to_string(),
+        nonce: format!("nonce_selftest_forged_{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()),
         signature: "forged_signature_vector".to_string(),
     };
     assert!(pep.verify_and_enforce(&forged_token, "file_write", "/workspace/out.txt").is_err());
     println!("  [✓] Signature forgery blocked (Fail-Closed)");
 
-    // 4. Resource escape test (e.g. /workspace-evil)
+    // 4. Resource escape test
     let mut valid_token2 = CapabilityToken {
         token_id: "tok_test03".to_string(),
         plan_id: "plan_test".to_string(),
@@ -355,7 +680,7 @@ fn main() {
         autonomy_level: 1,
         issued_at: 1000,
         expires_at: 4102444800,
-        nonce: "nonce_unique_3".to_string(),
+        nonce: format!("nonce_selftest_esc_{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()),
         signature: String::new(),
     };
     valid_token2.signature = pep.compute_signature(&valid_token2);
@@ -371,151 +696,80 @@ fn main() {
         std::process::exit(0);
     }
 
-    println!("  [Guardrail OS] Tier-2 Native Rust PEP IPC socket server initializing...");
-    let port = std::env::var("GUARDRAIL_PEP_PORT").unwrap_or_else(|_| "8889".to_string());
-    let bind_addr = format!("127.0.0.1:{}", port);
+    // Initialize Unix Domain Socket Server with peer credentials
+    let raw_sock_path = std::env::var("GUARDRAIL_PEP_SOCKET")
+        .unwrap_or_else(|_| "/run/guardrail/pep.sock".to_string());
 
-    match std::net::TcpListener::bind(&bind_addr) {
-        Ok(listener) => {
-            println!("[Guardrail OS] Native Rust PEP daemon listening for IPC on TCP {}", bind_addr);
-            for stream in listener.incoming() {
+    let effective_sock_path = if let Some(parent) = std::path::Path::new(&raw_sock_path).parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            "/tmp/guardrail_pep.sock".to_string()
+        } else {
+            raw_sock_path
+        }
+    } else {
+        raw_sock_path
+    };
+
+    let _ = std::fs::remove_file(&effective_sock_path);
+
+    println!("  [Guardrail OS] Tier-2 Native Rust PEP initializing authenticated Unix domain socket at {}", effective_sock_path);
+
+    match std::os::unix::net::UnixListener::bind(&effective_sock_path) {
+        Ok(unix_listener) => {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&effective_sock_path, std::fs::Permissions::from_mode(0o600));
+            println!("[Guardrail OS] Native Rust PEP daemon listening on Unix socket: {} (mode 0600)", effective_sock_path);
+
+            for stream in unix_listener.incoming() {
                 match stream {
                     Ok(mut stream) => {
-                        use std::io::{BufReader, Write};
+                        if let Err(peer_err) = verify_peer_credentials(&stream) {
+                            eprintln!("[Guardrail OS] Unauthorized IPC peer rejected: {}", peer_err);
+                            continue;
+                        }
+                        use std::io::BufReader;
                         let mut reader = BufReader::new(match stream.try_clone() {
                             Ok(s) => s,
                             Err(_) => continue,
                         });
-                        process_ipc_stream(&mut reader, &mut stream, &mut pep);
+                        handle_connection(&mut reader, &mut stream, &mut pep);
                     }
                     Err(e) => {
-                        eprintln!("[Guardrail OS] IPC connection error: {}", e);
+                        eprintln!("[Guardrail OS] Unix IPC connection error: {}", e);
                     }
                 }
             }
         }
         Err(e) => {
-            eprintln!("[Guardrail OS] Could not bind PEP IPC socket on {}: {}", bind_addr, e);
-            loop {
-                std::thread::sleep(std::time::Duration::from_secs(5));
-            }
-        }
-    }
-}
+            eprintln!("[Guardrail OS] Could not bind Unix socket at {}: {}. Falling back to TCP loopback...", effective_sock_path, e);
+            let port = std::env::var("GUARDRAIL_PEP_PORT").unwrap_or_else(|_| "8889".to_string());
+            let bind_addr = format!("127.0.0.1:{}", port);
 
-fn extract_json_str(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{}\"", key);
-    if let Some(pos) = json.find(&pattern) {
-        let after = &json[pos + pattern.len()..];
-        if let Some(colon) = after.find(':') {
-            let val_part = after[colon + 1..].trim();
-            if val_part.starts_with('"') {
-                let rest = &val_part[1..];
-                if let Some(end_quote) = rest.find('"') {
-                    return Some(rest[..end_quote].to_string());
+            match std::net::TcpListener::bind(&bind_addr) {
+                Ok(tcp_listener) => {
+                    println!("[Guardrail OS] Native Rust PEP daemon listening on TCP {}", bind_addr);
+                    for stream in tcp_listener.incoming() {
+                        match stream {
+                            Ok(mut stream) => {
+                                use std::io::BufReader;
+                                let mut reader = BufReader::new(match stream.try_clone() {
+                                    Ok(s) => s,
+                                    Err(_) => continue,
+                                });
+                                handle_connection(&mut reader, &mut stream, &mut pep);
+                            }
+                            Err(e) => {
+                                eprintln!("[Guardrail OS] TCP connection error: {}", e);
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    eprintln!("[Guardrail OS] FATAL: Could not bind PEP socket: {}", err);
+                    std::process::exit(1);
                 }
             }
         }
-    }
-    None
-}
-
-fn extract_json_num(json: &str, key: &str) -> Option<u64> {
-    let pattern = format!("\"{}\"", key);
-    if let Some(pos) = json.find(&pattern) {
-        let after = &json[pos + pattern.len()..];
-        if let Some(colon) = after.find(':') {
-            let val_part = after[colon + 1..].trim();
-            let num_str: String = val_part.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if !num_str.is_empty() {
-                return num_str.parse::<u64>().ok();
-            }
-        }
-    }
-    None
-}
-
-fn process_ipc_stream<R: std::io::Read, W: std::io::Write>(
-    reader: &mut std::io::BufReader<R>,
-    writer: &mut W,
-    pep: &mut NativeDataPlanePEP,
-) {
-    use std::io::BufRead;
-    let mut line = String::new();
-    while let Ok(bytes) = reader.read_line(&mut line) {
-        if bytes == 0 {
-            break;
-        }
-        if bytes > 65536 {
-            let _ = writer.write_all(b"{\"proto_ver\":\"v2.5\",\"verdict\":\"TRAP_DENY\",\"reason\":\"TRAP_DENY: Message exceeds 64KB size limit\"}\n");
-            let _ = writer.flush();
-            break;
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            line.clear();
-            continue;
-        }
-
-        if trimmed.contains("\"ping\"") || trimmed.contains("\"health_check\"") {
-            let resp = format!(
-                "{{\"proto_ver\":\"v2.5\",\"status\":\"healthy\",\"engine\":\"Guardrail Native Rust PEP v2.5\",\"consumed_nonces\":{}}}\n",
-                pep.consumed_nonces.len()
-            );
-            let _ = writer.write_all(resp.as_bytes());
-            let _ = writer.flush();
-            line.clear();
-            continue;
-        }
-
-        let proto_ver = extract_json_str(trimmed, "proto_ver").unwrap_or_default();
-        let req_id = extract_json_str(trimmed, "request_id").unwrap_or_default();
-        let timestamp = extract_json_num(trimmed, "timestamp").unwrap_or(0);
-        let ipc_sig = extract_json_str(trimmed, "ipc_sig").unwrap_or_default();
-        let is_revoked = extract_json_str(trimmed, "is_revoked").unwrap_or_default() == "true";
-
-        let token = CapabilityToken {
-            token_id: extract_json_str(trimmed, "token_id").unwrap_or_default(),
-            plan_id: extract_json_str(trimmed, "plan_id").unwrap_or_default(),
-            step_id: extract_json_str(trimmed, "step_id").unwrap_or_default(),
-            action_type: extract_json_str(trimmed, "action_type").unwrap_or_default(),
-            resource: extract_json_str(trimmed, "resource").unwrap_or_default(),
-            autonomy_level: extract_json_num(trimmed, "autonomy_level").unwrap_or(0) as u8,
-            issued_at: extract_json_num(trimmed, "issued_at").unwrap_or(0),
-            expires_at: extract_json_num(trimmed, "expires_at").unwrap_or(0),
-            nonce: extract_json_str(trimmed, "nonce").unwrap_or_default(),
-            signature: extract_json_str(trimmed, "signature").unwrap_or_default(),
-        };
-        let requested_action = extract_json_str(trimmed, "requested_action")
-            .unwrap_or_else(|| token.action_type.clone());
-        let target_resource = extract_json_str(trimmed, "target_resource")
-            .unwrap_or_else(|| token.resource.clone());
-
-        // Authenticate IPC Payload Signature
-        let canonical_token = NativeDataPlanePEP::compute_canonical_payload(&token);
-        let ipc_canonical = format!("{}:{}:{}:{}:{}:{}", proto_ver, req_id, timestamp, requested_action, target_resource, canonical_token);
-        let expected_ipc_sig = crypto::to_hex(&crypto::hmac_sha256(&pep.secret_key, ipc_canonical.as_bytes()));
-
-        let resp = if is_revoked {
-            "{\"proto_ver\":\"v2.5\",\"verdict\":\"TRAP_DENY\",\"reason\":\"TRAP_DENY: Capability token or bound plan has been revoked by security policy\",\"latency_ms\":0.01,\"tier\":\"Tier-2 Native Rust PEP Daemon\"}\n".to_string()
-        } else if !ipc_sig.is_empty() && !crypto::constant_time_eq(ipc_sig.to_lowercase().as_bytes(), expected_ipc_sig.as_bytes()) {
-            "{\"proto_ver\":\"v2.5\",\"verdict\":\"TRAP_DENY\",\"reason\":\"TRAP_DENY: IPC authentication failed (HMAC signature mismatch on local socket)\",\"latency_ms\":0.01,\"tier\":\"Tier-2 Native Rust PEP Daemon\"}\n".to_string()
-        } else {
-            match pep.verify_and_enforce(&token, &requested_action, &target_resource) {
-                Ok(elapsed_us) => format!(
-                    "{{\"proto_ver\":\"v2.5\",\"verdict\":\"ALLOW\",\"reason\":\"Cryptographic HMAC token verified by Native Rust PEP Engine\",\"latency_ms\":{:.3},\"tier\":\"Tier-2 Native Rust PEP Daemon\"}}\n",
-                    (elapsed_us as f64) / 1000.0
-                ),
-                Err(reason) => format!(
-                    "{{\"proto_ver\":\"v2.5\",\"verdict\":\"TRAP_DENY\",\"reason\":\"{}\",\"latency_ms\":0.01,\"tier\":\"Tier-2 Native Rust PEP Daemon\"}}\n",
-                    reason.replace('"', "\\\"")
-                ),
-            }
-        };
-
-        let _ = writer.write_all(resp.as_bytes());
-        let _ = writer.flush();
-        line.clear();
     }
 }
 
@@ -524,9 +778,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_native_pep_verification_suite() {
+    fn test_native_pep_verification_and_durability() {
         let secret = b"ci_pipeline_secure_random_key_987654321".to_vec();
-        let mut pep = NativeDataPlanePEP::new(secret);
+        let mut pep = NativeDataPlanePEP::new(secret, ":memory:").unwrap();
 
         let mut token = CapabilityToken {
             token_id: "tok_test01".to_string(),
@@ -542,17 +796,48 @@ mod tests {
         };
         token.signature = pep.compute_signature(&token);
 
-        // Valid assertion
+        // 1. Valid assertion
         assert!(pep.verify_and_enforce(&token, "file_read", "/workspace/config.json").is_ok());
 
-        // Replay assertion
+        // 2. Replay assertion (durable SQLite atomic insert blocks replay)
         assert!(pep.verify_and_enforce(&token, "file_read", "/workspace/config.json").is_err());
+    }
+
+    #[test]
+    fn test_authoritative_revocation_in_sqlite() {
+        let secret = b"ci_pipeline_secure_random_key_987654321".to_vec();
+        let mut pep = NativeDataPlanePEP::new(secret, ":memory:").unwrap();
+
+        let mut token = CapabilityToken {
+            token_id: "tok_revoked_01".to_string(),
+            plan_id: "plan_revoked_01".to_string(),
+            step_id: "step_0".to_string(),
+            action_type: "file_read".to_string(),
+            resource: "/workspace".to_string(),
+            autonomy_level: 1,
+            issued_at: 1000,
+            expires_at: 4102444800,
+            nonce: "nonce_rev_1".to_string(),
+            signature: String::new(),
+        };
+        token.signature = pep.compute_signature(&token);
+
+        // Insert revocation directly into SQLite
+        pep.db_conn.execute(
+            "INSERT INTO revocations (id, target_type, revoked_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![token.token_id, "token", 1000.0],
+        ).unwrap();
+
+        // Must be denied immediately by Rust engine
+        let res = pep.verify_and_enforce(&token, "file_read", "/workspace/config.json");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("revoked by security policy"));
     }
 
     #[test]
     fn test_resource_escapement_prevention() {
         let secret = b"ci_pipeline_secure_random_key_987654321".to_vec();
-        let mut pep = NativeDataPlanePEP::new(secret);
+        let mut pep = NativeDataPlanePEP::new(secret, ":memory:").unwrap();
 
         let mut token = CapabilityToken {
             token_id: "tok_test02".to_string(),
@@ -571,4 +856,3 @@ mod tests {
         assert!(pep.verify_and_enforce(&token, "file_read", "/workspace-evil/hacked").is_err());
     }
 }
-

@@ -7,3 +7,9 @@ description = "Guardrail OS Tier-2 Data Plane Policy Enforcement Point Daemon"
 [[bin]]
 name = "guardrail-pep-daemon"
 path = "src/guardrail/pep_kernel/native_pep.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.31", features = ["bundled"] }
+
