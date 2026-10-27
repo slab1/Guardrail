@@ -103,7 +103,10 @@ export const App: React.FC = () => {
     // 3. Periodic kernel state telemetry polling
     const fetchState = () => {
       fetch("/api/kernel/state")
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) return null;
+          return res.json();
+        })
         .then(data => {
           if (data && typeof data === "object") {
             setKernelState(data);

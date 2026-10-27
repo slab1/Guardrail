@@ -126,6 +126,31 @@
       "latency_ms": 189.4102810001641,
       "speculative": false,
       "approver": null
+    },
+    {
+      "timestamp": 1793097694.0805507,
+      "type": "INTENT_PROCESSED",
+      "intent": "read README.md",
+      "details": {
+        "intent": "read README.md",
+        "guard_verdict": true,
+        "logic_verdict": true,
+        "trust_score": 100.0,
+        "latency_ms": 115.57081700004801,
+        "speculative": false,
+        "tier2_tokens_issued": false,
+        "plan_hash": "28a374e2d2a45858a6cbe037eb501d220aec009c6c942fb353a1d9dac30088bc",
+        "tenant_id": "tenant-secops",
+        "user_id": "dev_user"
+      },
+      "prev_hash": "6fb0be5f9aaf743e46cf87739a86f461af6070c7f4ce9ecb05c075262942f5e8",
+      "hash": "c795426963e05cce539d480a03a082b0d9685561b5c37943d87c29ab82f1a005",
+      "guard_verdict": true,
+      "logic_verdict": true,
+      "trust_score": 100.0,
+      "latency_ms": 115.57081700004801,
+      "speculative": false,
+      "approver": null
     }
   ],
   "active_plans": {
@@ -329,6 +354,27 @@
       "validation_errors": [],
       "created_at": 1793027174.5929742,
       "plan_hash": "05c70a128731d2da2125b20cd870e735ca66533d7d1aeaba31fdbc5a346ad869"
+    },
+    "plan_917df62e": {
+      "id": "plan_917df62e",
+      "intent": "read README.md",
+      "description": "Generated Plan for intent: read README.md",
+      "status": "pending_consent",
+      "user_id": "dev_user",
+      "tenant_id": "tenant-secops",
+      "steps": [
+        {
+          "id": "step_1",
+          "description": "Read file",
+          "action": "file_read",
+          "resource": "/workspace/README.md",
+          "risk": "low",
+          "capability_token": null
+        }
+      ],
+      "validation_errors": [],
+      "created_at": 1793097694.0805411,
+      "plan_hash": "28a374e2d2a45858a6cbe037eb501d220aec009c6c942fb353a1d9dac30088bc"
     }
   },
   "custom_templates": []
