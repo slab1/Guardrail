@@ -78,13 +78,9 @@ jobs:
           PEP_SELF_TEST_ONLY: "1"
         run: |
           rustc --version
-          # Compile and run the hardened Tier-2 PEP self-tests
-          if [ -f Cargo.toml ]; then
-            cargo test --quiet --manifest-path .
-          else
-            echo "::warning::Cargo.toml not found, skipping native Rust PEP compilation test"
-            echo "PEP self-tests skipped in CI"
-          fi
+          cargo test --verbose
+          cargo run --release
+
 
   # ---------------------------------------------------------------
   # Job 3: Security & SAST Audit (Static Code Analysis)

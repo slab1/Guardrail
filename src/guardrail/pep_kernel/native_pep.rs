@@ -378,3 +378,57 @@ fn main() {
         std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_native_pep_verification_suite() {
+        let secret = b"ci_pipeline_secure_random_key_987654321".to_vec();
+        let mut pep = NativeDataPlanePEP::new(secret);
+
+        let mut token = CapabilityToken {
+            token_id: "tok_test01".to_string(),
+            plan_id: "plan_test".to_string(),
+            step_id: "step_0".to_string(),
+            action_type: "file_read".to_string(),
+            resource: "/workspace".to_string(),
+            autonomy_level: 1,
+            issued_at: 1000,
+            expires_at: 4102444800,
+            nonce: "nonce_unique_1".to_string(),
+            signature: String::new(),
+        };
+        token.signature = pep.compute_signature(&token);
+
+        // Valid assertion
+        assert!(pep.verify_and_enforce(&token, "file_read", "/workspace/config.json").is_ok());
+
+        // Replay assertion
+        assert!(pep.verify_and_enforce(&token, "file_read", "/workspace/config.json").is_err());
+    }
+
+    #[test]
+    fn test_resource_escapement_prevention() {
+        let secret = b"ci_pipeline_secure_random_key_987654321".to_vec();
+        let mut pep = NativeDataPlanePEP::new(secret);
+
+        let mut token = CapabilityToken {
+            token_id: "tok_test02".to_string(),
+            plan_id: "plan_test".to_string(),
+            step_id: "step_1".to_string(),
+            action_type: "file_read".to_string(),
+            resource: "/workspace".to_string(),
+            autonomy_level: 1,
+            issued_at: 1000,
+            expires_at: 4102444800,
+            nonce: "nonce_unique_2".to_string(),
+            signature: String::new(),
+        };
+        token.signature = pep.compute_signature(&token);
+
+        assert!(pep.verify_and_enforce(&token, "file_read", "/workspace-evil/hacked").is_err());
+    }
+}
+

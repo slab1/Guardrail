@@ -1,0 +1,9 @@
+[package]
+name = "guardrail-pep-daemon"
+version = "0.1.0"
+edition = "2021"
+description = "Guardrail OS Tier-2 Data Plane Policy Enforcement Point Daemon"
+
+[[bin]]
+name = "guardrail-pep-daemon"
+path = "src/guardrail/pep_kernel/native_pep.rs"

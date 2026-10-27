@@ -20,13 +20,10 @@ WORKDIR /app
 
 COPY . .
 # Compile the native Tier-2 Data Plane PEP daemon with release optimizations
-RUN if [ -f Cargo.toml ]; then \
-      cargo build --release && \
-      GUARDRAIL_PEP_SECRET="ci_pipeline_secure_random_key_987654321" PEP_SELF_TEST_ONLY="1" ./target/release/guardrail-pep-daemon; \
-    else \
-      echo "Cargo.toml not found, skipping native Rust PEP build" && \
-      rustc --version; \
-    fi
+RUN cargo build --release && \
+    cp target/release/guardrail-pep-daemon /app/guardrail-pep-daemon && \
+    GUARDRAIL_PEP_SECRET="ci_pipeline_secure_random_key_987654321" PEP_SELF_TEST_ONLY="1" /app/guardrail-pep-daemon
+
 
 # =========================================================
 # Stage 3: Production Python Kernel Engine (FastAPI + Z3 + Native PEP)
