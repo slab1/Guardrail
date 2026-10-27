@@ -1,78 +1,82 @@
-# Guardrail OS - Production Enforcement Gate Hardening Plan
+# Implementation Plan — Two-Stage Release Workflow: Developer Preview to Production
 
-1-2 sentence summary: Hardens Guardrail OS into a production-ready AI security gateway by enforcing native Rust PEP execution, Unix domain socket / HMAC-authenticated local IPC with peer verification, single-supervisor fail-fast startup, durable SQLite WAL revocation consistency, and zero-default secret enforcement.
-
-## User Review & Critical Decisions
-
-> [!IMPORTANT]
-> The following architectural decisions have been confirmed in Phase 1 and govern this release hardening:
-
-- **Confirmed Decision 1 (IPC Authentication)**: Unix domain socket at `/run/guardrail/pep.sock` with file permission restriction (`0600`) and socket peer credential validation, backed by HMAC-SHA256 authenticated message payloads (signed request ID, timestamp/nonce, protocol version `v2.5`).
-- **Confirmed Decision 2 (Startup Supervision & Fail-Fast)**: Eliminate duplicate process launches. FastAPI kernel retries connection for up to 30 seconds with exponential backoff, verifies daemon protocol version and readiness, and immediately aborts startup (`exit 1`) if native PEP is unavailable or unauthenticated when required (`GUARDRAIL_USE_NATIVE_PEP=1` or `REQUIRE_NATIVE_PEP=1`).
-- **Confirmed Decision 3 (Durable Revocation Coordination)**: Unified SQLite WAL database for revocations and consumed nonces. The Native Rust PEP queries or enforces the durable SQLite revocation store prior to capability execution, guaranteeing consistent token/plan revocation across restarts and workers.
-- **Confirmed Decision 4 (Zero-Default Secret Policy)**: Remove `ci_docker_compose_secret_key_987654321` and all insecure fallback defaults from `docker-compose.yml`, `Dockerfile`, `app.py`, and `native_pep.rs`. Startup fails if `GUARDRAIL_PEP_SECRET` is missing or contains known test strings.
+Deliver a structured two-stage release workflow for Guardrail OS:
+1. **Stage 1: Developer Preview Release**: Distribute Guardrail OS with complete source, installation guides, automated security test evidence (0 Bandit issues, 21/21 passed Pytest suite), and an interactive **Developer Review & Audit Portal**.
+2. **Stage 2: Production Promotion Pipeline**: Provide a formal, verified gate-check workflow that transitions the kernel from Developer Preview to Production Release only after security review sign-off and multi-gate invariant verification.
 
 ---
 
-## 1. System Architecture & IPC Data Flow
+## 1. Architecture & Workflow Design
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                   FastAPI Control Plane (Port 8888)                    │
-│  - Authoritative Firebase RS256 Auth & Tenant Isolation                │
-│  - Z3 SMT Formal Verifier & Dual-LLM Heuristic Firewall                │
-│  - Durable SQLite WAL Revocation & Nonce Store                         │
-└──────────────────────────────────┬─────────────────────────────────────┘
-                                   │
-                    Local Authenticated IPC
-       (Unix Socket /run/guardrail/pep.sock / TCP 127.0.0.1:8889)
-         - Peer Credential Validation (UID/GID)
-         - HMAC-SHA256 Payload Signature
-         - Max Message Size 64KB + Protocol Version v2.5
-                                   │
-                                   ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│               Native Tier-2 Rust PEP Daemon (Fast-Path)                │
-│  - Zero GC Constant-Time HMAC Signature Check                          │
-│  - SQLite WAL Revocation & Nonce Linearity Enforcement                 │
-│  - Canonical Resource Envelope Path Component Escapement Trap          │
-│  - Active Linux Seccomp & eBPF Syscall Filter Telemetry Status         │
-└────────────────────────────────────────────────────────────────────────┘
++-----------------------------------------------------------------------------------------+
+| STAGE 1: DEVELOPER PREVIEW RELEASE (v2.5.0-alpha)                                        |
+| - Clear Security Boundary Advisory (Early release, not a certified production boundary) |
+| - Full Source, Docker Compose & Standalone Setup Guides                                 |
+| - Automated Verification Evidence: Bandit 0 issues, Pytest 21/21, Z3 SMT proofs         |
+| - Interactive Developer Review Portal (Live benchmark, fault injection, checklist)     |
++-----------------------------------------------------------------------------------------+
+                                           |
+                                           v [Developer / Security Review Sign-Off]
++-----------------------------------------------------------------------------------------+
+| PRODUCTION RELEASE GATE VERIFICATION                                                    |
+| [✓] Gate 1: Formal Developer Review Sign-Off recorded in tamper-evident ledger          |
+| [✓] Gate 2: Automated Invariant Suite (Bandit AST 0 issues, 21/21 Pytest, Z3 SMT)       |
+| [✓] Gate 3: Native PEP fail-closed enforcement (REQUIRE_NATIVE_PEP=1 & random key)       |
+| [✓] Gate 4: Security Officer / Super Admin Authorization                                |
++-----------------------------------------------------------------------------------------+
+                                           |
+                                           v [Promote to Production]
++-----------------------------------------------------------------------------------------+
+| STAGE 2: PRODUCTION RELEASE (v2.5.0-GA)                                                 |
+| - Kernel transitions to STRICT_PRODUCTION mode                                          |
+| - Native Rust PEP required with hardware-adjacent token interception                     |
+| - Tamper-evident cryptographic audit certificate generated and downloadable             |
++-----------------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 2. Key Hardening Steps & Sub-System Strategy
+## 2. User Experience & UI Enhancements
 
-### A. Environment & Process Supervision
-- **Single Process Management**: Remove secondary `Popen` launch in FastAPI lifespan (`app.py`). Use container entrypoint (`docker-compose.yml` / `Dockerfile`) as single process supervisor.
-- **Fail-Fast Startup Healthcheck**: In `app.py` lifespan, perform up to 30-second bounded exponential backoff retries to connect to `/run/guardrail/pep.sock` (or `127.0.0.1:8889`). Verify daemon ping response, protocol version `v2.5`, and secret handshake. Abort FastAPI startup (`sys.exit(1)`) if readiness check fails when native mode is required.
-- **Eliminate Default Secrets**: Remove hardcoded default secrets from `docker-compose.yml` and `Dockerfile`. Update reject patterns in `native_pep.rs` and `data_plane_pep.py` to block `ci_docker_compose_secret_key_`.
+- **Dedicated Two-Stage Release Portal** in the UI (accessible via the Header wordmark and the Governance tab):
+  - **Stage 1 View (Developer Preview)**:
+    - Quickstart installation cards (Docker Compose, Native Rust PEP, Python fastpath).
+    - Live Test Runner widget: Runs or displays results for Bandit static security scan, Pytest suite, and Rust microsecond benchmark.
+    - Interactive **Developer Review Form**: Auditors can test the kernel, verify invariants, add audit notes, and submit formal sign-off.
+  - **Stage 2 View (Production Release Gate)**:
+    - Live verification matrix showing status for each of the 4 production release gates.
+    - "Promote to Production Release" action button (enabled once sign-off and all gates pass).
+    - Production Status Dashboard: Displays Production Certificate, timestamp, verified invariants, and tamper-evident audit hash link.
+    - One-click "Export Production Release Verification Bundle" (JSON/PDF-ready bundle).
 
-### B. Authenticated Local IPC Protocol
-- **IPC Transport**: Primary Unix domain socket `/run/guardrail/pep.sock` with fallback TCP `127.0.0.1:8889` for non-root local dev.
-- **Authenticated Message Protocol**:
-  ```json
-  {
-    "proto_ver": "v2.5",
-    "request_id": "req_8f12a30b",
-    "timestamp": 1729000000.123,
-    "token_data": { ... },
-    "requested_action": "file_read",
-    "target_resource": "/workspace/config.json",
-    "ipc_sig": "<hmac-sha256-of-payload-using-pep-secret>"
-  }
-  ```
-- **Daemon Input Guards**: Enforce 64KB max buffer size, 1.0s socket timeout, malformed JSON rejection, and timestamp freshness check (±30s skew window).
+---
 
-### C. Unified Revocation & Anti-Replay Guarantees
-- **Durable Revocation Checks in Native Rust**: Update `native_pep.rs` and `data_plane_pep.py` so that token/plan revocation sets are backed by `consumed_nonces.db` SQLite WAL table `revocations`.
-- **Pre-Verification Revocation Gate**: Both Python and Rust PEP engines check SQLite revocation records prior to signature verification, ensuring immediate denial across process restarts and worker processes.
+## 3. Backend Kernel API Endpoints (`app.py`)
 
-### D. Verification & Testing
-- **End-to-End Integration Tests**: Update `tests/test_data_plane_pep.py` and add integration tests verifying:
-  1. Daemon startup fail-fast when `REQUIRE_NATIVE_PEP=1` and daemon is down.
-  2. Immediate rejection of forbidden default secrets.
-  3. Consistent token & plan revocation denial across restarts.
-  4. IPC HMAC signature verification and rejection of forged/tampered IPC messages.
-- **Build & Lint Verification**: Run `compile_applet`, `lint_applet`, and `pytest tests/` to confirm zero regressions.
+- `GET /api/release/status`:
+  - Returns current release state (`DEVELOPER_PREVIEW` vs `PRODUCTION_RELEASE`), active version, gate checklist, developer reviews list, and promotion certificate (if promoted).
+- `POST /api/release/review`:
+  - Submits a developer review / security evaluation (reviewer name, role, organization, checklist items verified, review comments, decision: `APPROVED` | `NEEDS_REMEDIATION`).
+  - Records the review to the tamper-evident SHA-256 audit ledger.
+- `POST /api/release/promote`:
+  - Verifies caller has role `super_admin`, `admin`, or `security_officer`.
+  - Verifies that all 4 release gates are satisfied.
+  - Transitions kernel release mode to `PRODUCTION_RELEASE`.
+  - Appends a cryptographic promotion record to the audit ledger and saves state to `data/kernel_storage.json`.
+- `POST /api/release/rollback`:
+  - Allows reverting back to `DEVELOPER_PREVIEW` if new findings or regressions emerge during testing.
+
+---
+
+## 4. Verification & Testing Plan
+
+1. **Automated Backend Tests (`tests/test_release_workflow.py`)**:
+   - Test initial state defaults to `DEVELOPER_PREVIEW` with proper disclaimers.
+   - Test developer review submission and audit ledger linkage.
+   - Test that unapproved promotion attempts are rejected (400 Bad Request if gates are unmet).
+   - Test successful promotion to `PRODUCTION_RELEASE` when all gates are satisfied.
+2. **Security & Invariant Validation**:
+   - Run `python -m bandit -r src/ -ll -ii` (must maintain 0 issues).
+   - Run `python3 -m pytest tests/` (all tests passing).
+   - Run `eslint` and `compile_applet` (0 errors).

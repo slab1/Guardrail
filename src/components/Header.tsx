@@ -65,6 +65,9 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="text-lg font-bold tracking-tight text-white whitespace-nowrap">
             Guardrail OS
           </span>
+          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 uppercase tracking-wider hidden sm:inline-block">
+            v2.5 Alpha Preview
+          </span>
         </div>
 
         {/* Zone 2: Navigation Links */}

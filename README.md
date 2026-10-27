@@ -1,11 +1,17 @@
 # Guardrail OS - High-Performance Formal Security Kernel for Autonomous AI Agents
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
+[![Release Status](https://img.shields.io/badge/release-Public_Alpha_%2F_Dev_Preview-amber.svg)]()
 [![PEP Latency Target](https://img.shields.io/badge/PEP_Latency-<0.05ms-blue.svg)]()
 [![Compliance](https://img.shields.io/badge/compliance-EU_AI_Act_%7C_NIST_AI_RMF-emerald.svg)]()
 [![Standards](https://img.shields.io/badge/IETF-AuthZEN_%7C_SPIFFE-purple.svg)]()
 
-**Guardrail OS** is a production-grade, formal-methods-backed security kernel and deterministic Policy Enforcement Point (PEP) designed for autonomous AI agent fleets. It eliminates safety hazards, prompt injections, privilege escalation, and unauthorized tool calls through **The Dual-Tier Model**: separating asynchronous cognitive policy compilation (Tier 1 Control Plane) from non-bypassable microsecond capability token verification and eBPF/Seccomp syscall trapping (Tier 2 Data Plane).
+> ⚠️ **RELEASE NOTICE & SECURITY BOUNDARY DISCLAIMER**  
+> **Release Type**: **Public Alpha / Developer Preview (v2.5.0-alpha)**  
+> Guardrail OS is published for research, developer evaluation, and prototyping. It is **not yet a certified production security boundary**. End-to-end OS-level blocking, deployment behavior under daemon failure, and cross-engine revocation guarantees must be independently verified for your target runtime. See [RELEASE_DECISION.md](RELEASE_DECISION.md) for full audit findings, known limitations, and security test evidence.
+
+**Guardrail OS** is a formal-methods-backed security kernel and deterministic Policy Enforcement Point (PEP) designed for autonomous AI agent fleets. It eliminates safety hazards, prompt injections, privilege escalation, and unauthorized tool calls through **The Dual-Tier Model**: separating asynchronous cognitive policy compilation (Tier 1 Control Plane) from non-bypassable microsecond capability token verification and eBPF/Seccomp syscall trapping (Tier 2 Data Plane).
+
 
 ---
 
@@ -110,10 +116,11 @@ Guardrail OS is built for real production applications. See our complete [Real P
 
 ## Documentation
 
+- 📄 **[Release Decision & Security Evaluation (RELEASE_DECISION.md)](RELEASE_DECISION.md)** — Audit findings, release matrix, known limitations, and test verification.
 - 📘 **[Real Production Integrations Guide](PRODUCTION_INTEGRATIONS.md)** — Architectural integration patterns & code blueprints.
 - 📕 **[Guardrail OS User Manual](USER_MANUAL.md)** — Comprehensive operational handbook, playbooks, and API specs.
 
 ---
 
-*Guardrail OS Kernel v2.4 • Sub-10ms Non-Bypassable PEP Standard*
+*Guardrail OS Kernel v2.5.0-alpha • Public Alpha / Developer Preview Standard*
 
