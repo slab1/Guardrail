@@ -67,6 +67,8 @@ const initialDefaultPlan: ValidatedPlan = {
   risk_score: "medium"
 };
 
+import { safeFetchJson } from "./services/apiClient";
+
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState("studio");
   const [dbConnected, setDbConnected] = useState(false);
@@ -102,17 +104,11 @@ export const App: React.FC = () => {
 
     // 3. Periodic kernel state telemetry polling
     const fetchState = () => {
-      fetch("/api/kernel/state")
-        .then(res => {
-          if (!res.ok) return null;
-          return res.json();
-        })
-        .then(data => {
-          if (data && typeof data === "object") {
-            setKernelState(data);
-          }
-        })
-        .catch(err => console.error("Kernel state fetch failed", err));
+      safeFetchJson("/api/kernel/state").then((data) => {
+        if (data && typeof data === "object") {
+          setKernelState(data);
+        }
+      });
     };
 
     fetchState();

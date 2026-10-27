@@ -28,6 +28,8 @@ interface PlanStudioProps {
   onNavigateTab?: (tab: string) => void;
 }
 
+import { fetchJsonOrThrow } from "../services/apiClient";
+
 export const PlanStudio: React.FC<PlanStudioProps> = ({
   onPlanCreated,
   onExplainDenial,
@@ -45,18 +47,11 @@ export const PlanStudio: React.FC<PlanStudioProps> = ({
     setResult(null);
     try {
       const start = performance.now();
-      const res = await fetch("/api/intent", {
+      const data = await fetchJsonOrThrow("/api/intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ intent }),
       });
-      if (!res.ok) {
-        const text = await res.text();
-        let errJson: any;
-        try { errJson = JSON.parse(text); } catch { errJson = { detail: text || `HTTP ${res.status} Error` }; }
-        throw new Error(errJson.detail || `Server error (${res.status})`);
-      }
-      const data = await res.json();
       setLatency(performance.now() - start);
       setResult(data);
       onPlanCreated?.(data);

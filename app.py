@@ -131,14 +131,32 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
-    daemon_path = "/usr/local/bin/guardrail-pep-daemon"
-    if os.path.exists(daemon_path) and os.access(daemon_path, os.X_OK):
-        try:
-            import subprocess
-            subprocess.Popen([daemon_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("[+] Native Tier-2 Rust PEP daemon initialized and running in background.")
-        except Exception as e:
-            print(f"[!] Warning: Could not launch native PEP daemon: {e}")
+    # Single Process Supervision & Bounded Backoff Startup Healthcheck
+    require_native = os.environ.get("REQUIRE_NATIVE_PEP", "").lower() in ["1", "true", "yes"] or \
+                     os.environ.get("GUARDRAIL_USE_NATIVE_PEP", "").lower() in ["1", "true", "yes"] or \
+                     os.environ.get("GUARDRAIL_ENV", "").lower() in ["production", "prod"]
+
+    if require_native:
+        print("[+] Guardrail OS Kernel initiating Native PEP daemon readiness verification...")
+        start_time = time.time()
+        max_wait_seconds = 30.0
+        backoff = 0.5
+        daemon_ready = False
+
+        while time.time() - start_time < max_wait_seconds:
+            info = check_native_pep_daemon()
+            if info.get("connected"):
+                print(f"[+] Native Tier-2 Rust PEP daemon connected & verified ({info.get('engine')})")
+                daemon_ready = True
+                break
+            await asyncio.sleep(backoff)
+            backoff = min(2.0, backoff * 1.5)
+
+        if not daemon_ready:
+            print("[!] CRITICAL FATAL ERROR: Native Rust PEP daemon readiness check failed after 30 seconds.")
+            print("[!] Refusing to start FastAPI application without required native security enforcement.")
+            sys.exit(1)
+
     yield
 
 app = FastAPI(title="Guardrail OS Kernel", version="2.5.0", lifespan=lifespan)

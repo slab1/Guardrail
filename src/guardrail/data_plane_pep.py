@@ -35,7 +35,13 @@ def get_kernel_pep_secret() -> bytes:
     """
     env_secret = os.environ.get("GUARDRAIL_PEP_SECRET") or os.environ.get("KERNEL_PEP_SECRET")
     if env_secret:
-        return env_secret.encode("utf-8") if isinstance(env_secret, str) else env_secret
+        sec_str = env_secret.decode("utf-8") if isinstance(env_secret, bytes) else str(env_secret)
+        if any(sec_str.startswith(p) for p in ["default_secret_", "test_secret_", "changeme", "ci_docker_compose_secret_key_"]):
+            raise RuntimeError(
+                f"CRITICAL SECURITY CONFIGURATION ERROR: GUARDRAIL_PEP_SECRET contains an insecure default value '{sec_str}'. "
+                "Refusing to operate with default secret."
+            )
+        return sec_str.encode("utf-8")
 
     is_production = (
         os.environ.get("GUARDRAIL_ENV", "").lower() in ["production", "prod"] or
@@ -291,22 +297,57 @@ def verify_via_native_rust_pep(
     requested_action: str,
     target_resource: str,
     host: str = "127.0.0.1",
-    port: int = 8889
+    port: int = 8889,
+    is_revoked: bool = False,
+    secret_key: Optional[bytes] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Dispatches token verification request to the Native Rust PEP daemon over TCP IPC.
-    Returns response dict if daemon is reachable and responds, else None.
+    Dispatches token verification request to the Native Rust PEP daemon over Unix socket or TCP IPC.
+    Includes protocol version v2.5, request ID, timestamp, and HMAC-SHA256 signature authentication.
     """
     import socket
     import json
+
+    sec_key = secret_key or get_kernel_pep_secret()
+    proto_ver = "v2.5"
+    req_id = f"req_{uuid.uuid4().hex[:12]}"
+    ts = time.time()
+
+    token_id = token_data.get("token_id", "")
+    plan_id = token_data.get("plan_id", "")
+    step_id = token_data.get("step_id", "")
+    action_type = token_data.get("action_type", "")
+    resource = token_data.get("resource", "")
+    autonomy_level = token_data.get("autonomy_level", 0)
+    issued_at = token_data.get("issued_at", 0)
+    expires_at = token_data.get("expires_at", 0)
+    nonce = token_data.get("nonce", "")
+
+    canonical_token = f"{token_id}:{plan_id}:{step_id}:{action_type}:{resource}:{autonomy_level}:{issued_at}:{expires_at}:{nonce}"
+    ipc_canonical = f"{proto_ver}:{req_id}:{ts}:{requested_action}:{target_resource}:{canonical_token}".encode("utf-8")
+    ipc_sig = hmac.new(sec_key, ipc_canonical, hashlib.sha256).hexdigest()
+
     payload = dict(token_data)
+    payload["proto_ver"] = proto_ver
+    payload["request_id"] = req_id
+    payload["timestamp"] = ts
     payload["requested_action"] = requested_action
     payload["target_resource"] = target_resource
+    payload["is_revoked"] = "true" if is_revoked else "false"
+    payload["ipc_sig"] = ipc_sig
+
+    unix_socket_path = os.environ.get("GUARDRAIL_PEP_SOCKET", "/run/guardrail/pep.sock")
 
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(0.5)
-        s.connect((host, port))
+        if os.path.exists(unix_socket_path):
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect(unix_socket_path)
+        else:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.5)
+            s.connect((host, port))
+
         s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
 
         response_bytes = b""
@@ -460,9 +501,31 @@ class DataPlanePEP:
         t0 = time.perf_counter()
         self.total_enforcements += 1
 
+        token_id = token_data.get("token_id", "")
+        plan_id = token_data.get("plan_id", "")
+
+        # 0. Revocation Check (Fail-Closed)
+        is_revoked = (token_id and token_id in self.revoked_tokens) or (plan_id and plan_id in self.revoked_plans)
+        if is_revoked:
+            latency = (time.perf_counter() - t0) * 1000
+            self._record_trap("REVOKED_TOKEN", requested_action, target_resource, "Capability token or bound plan has been revoked")
+            return {
+                "verdict": "TRAP_DENY",
+                "reason": "Capability token or bound plan has been revoked by security policy",
+                "syscall_trap": "SIGSYS",
+                "latency_ms": latency,
+                "tier": "Tier-2 Data Plane (Hardware-Adjacent PEP)"
+            }
+
         # Native Rust PEP daemon IPC dispatch (if configured)
         if os.environ.get("GUARDRAIL_USE_NATIVE_PEP", "").lower() in ["1", "true", "yes"]:
-            native_res = verify_via_native_rust_pep(token_data, requested_action, target_resource)
+            native_res = verify_via_native_rust_pep(
+                token_data,
+                requested_action,
+                target_resource,
+                is_revoked=is_revoked,
+                secret_key=self.secret_key
+            )
             if native_res is not None:
                 if native_res.get("verdict") == "ALLOW":
                     return native_res
@@ -479,9 +542,6 @@ class DataPlanePEP:
                     "latency_ms": latency,
                     "tier": "Tier-2 Native Rust PEP Daemon (Disconnected)"
                 }
-
-        token_id = token_data.get("token_id", "")
-        plan_id = token_data.get("plan_id", "")
         step_id = token_data.get("step_id", "")
         action_type = token_data.get("action_type", "")
         resource = token_data.get("resource", "")

@@ -33,7 +33,11 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8888 \
-    GUARDRAIL_ENV=production
+    GUARDRAIL_ENV=production \
+    GUARDRAIL_USE_NATIVE_PEP=1 \
+    REQUIRE_NATIVE_PEP=1
+
+RUN mkdir -p /run/guardrail && chmod 0755 /run/guardrail
 
 # Install system dependencies including libseccomp
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -67,7 +71,7 @@ CMD ["sh", "-c", "\
     exit 1; \
   fi; \
   case \"$GUARDRAIL_PEP_SECRET\" in \
-    default_secret_1234567890|test_secret*|changeme*) \
+    default_secret*|test_secret*|changeme*|ci_docker_compose_secret_key*) \
       echo 'FATAL: GUARDRAIL_PEP_SECRET is set to a known insecure default value'; \
       exit 1; \
       ;; \

@@ -292,6 +292,7 @@ fn main() {
                 "default_secret_",
                 "test_secret_",
                 "changeme",
+                "ci_docker_compose_secret_key_",
             ];
             if insecure_patterns.iter().any(|p| val.starts_with(p)) {
                 eprintln!("ERROR: GUARDRAIL_PEP_SECRET contains an insecure default value");
@@ -379,8 +380,13 @@ fn main() {
             println!("[Guardrail OS] Native Rust PEP daemon listening for IPC on TCP {}", bind_addr);
             for stream in listener.incoming() {
                 match stream {
-                    Ok(stream) => {
-                        handle_ipc_connection(stream, &mut pep);
+                    Ok(mut stream) => {
+                        use std::io::{BufReader, Write};
+                        let mut reader = BufReader::new(match stream.try_clone() {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        });
+                        process_ipc_stream(&mut reader, &mut stream, &mut pep);
                     }
                     Err(e) => {
                         eprintln!("[Guardrail OS] IPC connection error: {}", e);
@@ -429,15 +435,20 @@ fn extract_json_num(json: &str, key: &str) -> Option<u64> {
     None
 }
 
-fn handle_ipc_connection(mut stream: std::net::TcpStream, pep: &mut NativeDataPlanePEP) {
-    use std::io::{BufRead, BufReader, Write};
-    let mut reader = BufReader::new(match stream.try_clone() {
-        Ok(s) => s,
-        Err(_) => return,
-    });
+fn process_ipc_stream<R: std::io::Read, W: std::io::Write>(
+    reader: &mut std::io::BufReader<R>,
+    writer: &mut W,
+    pep: &mut NativeDataPlanePEP,
+) {
+    use std::io::BufRead;
     let mut line = String::new();
     while let Ok(bytes) = reader.read_line(&mut line) {
         if bytes == 0 {
+            break;
+        }
+        if bytes > 65536 {
+            let _ = writer.write_all(b"{\"proto_ver\":\"v2.5\",\"verdict\":\"TRAP_DENY\",\"reason\":\"TRAP_DENY: Message exceeds 64KB size limit\"}\n");
+            let _ = writer.flush();
             break;
         }
         let trimmed = line.trim();
@@ -446,40 +457,64 @@ fn handle_ipc_connection(mut stream: std::net::TcpStream, pep: &mut NativeDataPl
             continue;
         }
 
-        let resp = if trimmed.contains("\"ping\"") || trimmed.contains("\"health_check\"") {
-            format!("{{\"status\":\"healthy\",\"engine\":\"Guardrail Native Rust PEP v2.5\",\"consumed_nonces\":{}}}\n", pep.consumed_nonces.len())
-        } else {
-            let token = CapabilityToken {
-                token_id: extract_json_str(trimmed, "token_id").unwrap_or_default(),
-                plan_id: extract_json_str(trimmed, "plan_id").unwrap_or_default(),
-                step_id: extract_json_str(trimmed, "step_id").unwrap_or_default(),
-                action_type: extract_json_str(trimmed, "action_type").unwrap_or_default(),
-                resource: extract_json_str(trimmed, "resource").unwrap_or_default(),
-                autonomy_level: extract_json_num(trimmed, "autonomy_level").unwrap_or(0) as u8,
-                issued_at: extract_json_num(trimmed, "issued_at").unwrap_or(0),
-                expires_at: extract_json_num(trimmed, "expires_at").unwrap_or(0),
-                nonce: extract_json_str(trimmed, "nonce").unwrap_or_default(),
-                signature: extract_json_str(trimmed, "signature").unwrap_or_default(),
-            };
-            let requested_action = extract_json_str(trimmed, "requested_action")
-                .unwrap_or_else(|| token.action_type.clone());
-            let target_resource = extract_json_str(trimmed, "target_resource")
-                .unwrap_or_else(|| token.resource.clone());
+        if trimmed.contains("\"ping\"") || trimmed.contains("\"health_check\"") {
+            let resp = format!(
+                "{{\"proto_ver\":\"v2.5\",\"status\":\"healthy\",\"engine\":\"Guardrail Native Rust PEP v2.5\",\"consumed_nonces\":{}}}\n",
+                pep.consumed_nonces.len()
+            );
+            let _ = writer.write_all(resp.as_bytes());
+            let _ = writer.flush();
+            line.clear();
+            continue;
+        }
 
+        let proto_ver = extract_json_str(trimmed, "proto_ver").unwrap_or_default();
+        let req_id = extract_json_str(trimmed, "request_id").unwrap_or_default();
+        let timestamp = extract_json_num(trimmed, "timestamp").unwrap_or(0);
+        let ipc_sig = extract_json_str(trimmed, "ipc_sig").unwrap_or_default();
+        let is_revoked = extract_json_str(trimmed, "is_revoked").unwrap_or_default() == "true";
+
+        let token = CapabilityToken {
+            token_id: extract_json_str(trimmed, "token_id").unwrap_or_default(),
+            plan_id: extract_json_str(trimmed, "plan_id").unwrap_or_default(),
+            step_id: extract_json_str(trimmed, "step_id").unwrap_or_default(),
+            action_type: extract_json_str(trimmed, "action_type").unwrap_or_default(),
+            resource: extract_json_str(trimmed, "resource").unwrap_or_default(),
+            autonomy_level: extract_json_num(trimmed, "autonomy_level").unwrap_or(0) as u8,
+            issued_at: extract_json_num(trimmed, "issued_at").unwrap_or(0),
+            expires_at: extract_json_num(trimmed, "expires_at").unwrap_or(0),
+            nonce: extract_json_str(trimmed, "nonce").unwrap_or_default(),
+            signature: extract_json_str(trimmed, "signature").unwrap_or_default(),
+        };
+        let requested_action = extract_json_str(trimmed, "requested_action")
+            .unwrap_or_else(|| token.action_type.clone());
+        let target_resource = extract_json_str(trimmed, "target_resource")
+            .unwrap_or_else(|| token.resource.clone());
+
+        // Authenticate IPC Payload Signature
+        let canonical_token = NativeDataPlanePEP::compute_canonical_payload(&token);
+        let ipc_canonical = format!("{}:{}:{}:{}:{}:{}", proto_ver, req_id, timestamp, requested_action, target_resource, canonical_token);
+        let expected_ipc_sig = crypto::to_hex(&crypto::hmac_sha256(&pep.secret_key, ipc_canonical.as_bytes()));
+
+        let resp = if is_revoked {
+            "{\"proto_ver\":\"v2.5\",\"verdict\":\"TRAP_DENY\",\"reason\":\"TRAP_DENY: Capability token or bound plan has been revoked by security policy\",\"latency_ms\":0.01,\"tier\":\"Tier-2 Native Rust PEP Daemon\"}\n".to_string()
+        } else if !ipc_sig.is_empty() && !crypto::constant_time_eq(ipc_sig.to_lowercase().as_bytes(), expected_ipc_sig.as_bytes()) {
+            "{\"proto_ver\":\"v2.5\",\"verdict\":\"TRAP_DENY\",\"reason\":\"TRAP_DENY: IPC authentication failed (HMAC signature mismatch on local socket)\",\"latency_ms\":0.01,\"tier\":\"Tier-2 Native Rust PEP Daemon\"}\n".to_string()
+        } else {
             match pep.verify_and_enforce(&token, &requested_action, &target_resource) {
                 Ok(elapsed_us) => format!(
-                    "{{\"verdict\":\"ALLOW\",\"reason\":\"Cryptographic HMAC token verified by Native Rust PEP Engine\",\"latency_ms\":{:.3},\"tier\":\"Tier-2 Native Rust PEP Daemon\"}}\n",
+                    "{{\"proto_ver\":\"v2.5\",\"verdict\":\"ALLOW\",\"reason\":\"Cryptographic HMAC token verified by Native Rust PEP Engine\",\"latency_ms\":{:.3},\"tier\":\"Tier-2 Native Rust PEP Daemon\"}}\n",
                     (elapsed_us as f64) / 1000.0
                 ),
                 Err(reason) => format!(
-                    "{{\"verdict\":\"TRAP_DENY\",\"reason\":\"{}\",\"latency_ms\":0.01,\"tier\":\"Tier-2 Native Rust PEP Daemon\"}}\n",
+                    "{{\"proto_ver\":\"v2.5\",\"verdict\":\"TRAP_DENY\",\"reason\":\"{}\",\"latency_ms\":0.01,\"tier\":\"Tier-2 Native Rust PEP Daemon\"}}\n",
                     reason.replace('"', "\\\"")
                 ),
             }
         };
 
-        let _ = stream.write_all(resp.as_bytes());
-        let _ = stream.flush();
+        let _ = writer.write_all(resp.as_bytes());
+        let _ = writer.flush();
         line.clear();
     }
 }

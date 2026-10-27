@@ -20,6 +20,7 @@ import {
   FileCode,
   Scale
 } from "lucide-react";
+import { safeFetchJson, fetchJsonOrThrow } from "../services/apiClient";
 
 interface BenchmarkData {
   tier1_control_plane: {
@@ -62,24 +63,21 @@ export const DualTierArchView: React.FC = () => {
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
 
   const fetchSyscallRules = () => {
-    fetch("/api/pep/syscall-rules")
-      .then((res) => res.json())
-      .then((data) => setSyscallProfiles(data))
-      .catch((err) => console.error("Syscall rules fetch failed", err));
+    safeFetchJson("/api/pep/syscall-rules").then((data: any) => {
+      if (data) setSyscallProfiles(data);
+    });
   };
 
   const fetchMetrics = () => {
-    fetch("/api/pep/metrics")
-      .then((res) => res.json())
-      .then((data) => setMetrics(data))
-      .catch((err) => console.error("Metrics fetch failed", err));
+    safeFetchJson("/api/pep/metrics").then((data: any) => {
+      if (data) setMetrics(data);
+    });
   };
 
   const runBenchmark = async () => {
     setIsRunningBench(true);
     try {
-      const res = await fetch("/api/pep/dual-benchmark", { method: "POST" });
-      const data = await res.json();
+      const data = await fetchJsonOrThrow("/api/pep/dual-benchmark", { method: "POST" });
       setBenchmark(data);
     } catch (err) {
       console.error("Benchmark failed", err);

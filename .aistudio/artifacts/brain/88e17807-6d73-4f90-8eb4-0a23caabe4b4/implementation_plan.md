@@ -1,86 +1,78 @@
-# Guardrail OS — CI/CD Pipeline Overhaul & Native Rust PEP Integration
+# Guardrail OS - Production Enforcement Gate Hardening Plan
 
-A comprehensive plan to resolve GitHub Actions CI/CD failures, establish full dual-engine testing (Python FastAPI + Native Rust PEP kernel), and integrate containerized multi-process execution with step summary reporting.
+1-2 sentence summary: Hardens Guardrail OS into a production-ready AI security gateway by enforcing native Rust PEP execution, Unix domain socket / HMAC-authenticated local IPC with peer verification, single-supervisor fail-fast startup, durable SQLite WAL revocation consistency, and zero-default secret enforcement.
 
-### User Review & Critical Decisions
+## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following design decisions were confirmed during Phase 1 clarification:
+> The following architectural decisions have been confirmed in Phase 1 and govern this release hardening:
 
-- **Confirmed Decision 1 (CI Strategy)**: Full Dual-Engine validation running Python `pytest` security suites alongside Native Rust PEP compilation, unit tests, and performance benchmarks.
-- **Confirmed Decision 2 (Daemon Integration)**: Multi-stage container entrypoint launching both the FastAPI application and the Native Rust PEP daemon concurrently.
-- **Confirmed Decision 3 (Reporting)**: Automated GitHub Workflow Summary with a rich security audit status matrix and sub-10ms benchmark summary table generated on every push/PR.
-
----
-
-### 1. Overview & Core Concept
-
-- **What It Does**: Hardens the Guardrail OS CI/CD workflow (`.github/workflows/ci.yaml` and `.github/workflows/ci-cd.yml`), fixes secrets/environment injection (`GUARDRAIL_PEP_SECRET`), compiles and links the Native Rust PEP kernel daemon, and runs the dual-engine validation suite.
-- **Target Audience**: Security Engineers, DevOps Engineers, and AI Safety Researchers auditing Guardrail OS kernel policy enforcement.
-- **Key Value**: Guarantees cryptographically verified capability token validation and sub-10ms policy enforcement in both local containerized environments and GitHub Actions CI pipelines.
+- **Confirmed Decision 1 (IPC Authentication)**: Unix domain socket at `/run/guardrail/pep.sock` with file permission restriction (`0600`) and socket peer credential validation, backed by HMAC-SHA256 authenticated message payloads (signed request ID, timestamp/nonce, protocol version `v2.5`).
+- **Confirmed Decision 2 (Startup Supervision & Fail-Fast)**: Eliminate duplicate process launches. FastAPI kernel retries connection for up to 30 seconds with exponential backoff, verifies daemon protocol version and readiness, and immediately aborts startup (`exit 1`) if native PEP is unavailable or unauthenticated when required (`GUARDRAIL_USE_NATIVE_PEP=1` or `REQUIRE_NATIVE_PEP=1`).
+- **Confirmed Decision 3 (Durable Revocation Coordination)**: Unified SQLite WAL database for revocations and consumed nonces. The Native Rust PEP queries or enforces the durable SQLite revocation store prior to capability execution, guaranteeing consistent token/plan revocation across restarts and workers.
+- **Confirmed Decision 4 (Zero-Default Secret Policy)**: Remove `ci_docker_compose_secret_key_987654321` and all insecure fallback defaults from `docker-compose.yml`, `Dockerfile`, `app.py`, and `native_pep.rs`. Startup fails if `GUARDRAIL_PEP_SECRET` is missing or contains known test strings.
 
 ---
 
-### 2. Pipeline Workflow & Summary UX
-
-- **CI Step-by-Step Execution Flow**:
-  1. **Lint & Syntax Matrix**: Validate Python ASGI endpoints and Rust PEP syntax with modern `dtolnay/rust-toolchain@stable`.
-  2. **Rust PEP Kernel Build & Bench**: Compile `native_pep` binary in release mode and execute microbenchmarks.
-  3. **Multi-Stage Container Spin-Up**: Launch Docker Compose with `GUARDRAIL_PEP_SECRET` configured, executing both `native_pep` daemon and FastAPI backend.
-  4. **Data-Plane PEP Integration Tests**: Run `pytest tests/test_data_plane_pep.py -v` verifying token validation, nonce freshness, and authorization boundaries.
-  5. **Security Summary Generation**: Render a structured Markdown report to `$GITHUB_STEP_SUMMARY` displaying test metrics, latency percentiles, and security checks.
-
----
-
-### 3. Key Technical Decisions & Trade-Offs
-
-- **Decision 1: Container Daemon Multi-Processing**
-  - *Chosen Approach*: Lightweight entrypoint script (`entrypoint.sh`) in the final Docker image starting `native_pep` daemon in background on IPC socket/port before exec-ing `python3 app.py`.
-  - *Why*: Ensures production containers and CI integration tests run against live active kernel enforcement rather than mock socket transports.
-  - *Alternatives Considered*: Background sidecar runners in GitHub Actions (less representative of production container deployment).
-
-- **Decision 2: Sub-10ms Benchmarking Tolerance**
-  - *Chosen Approach*: Statistically sampled mean/p95 latency assertions in test runners with relaxed upper bounds for virtualized CI runner noise.
-  - *Why*: Avoids intermittent CI pipeline flakiness caused by GitHub runner CPU throttling while strictly enforcing sub-10ms target performance on average.
-
----
-
-### 4. Technical Architecture & Data Strategy
+## 1. System Architecture & IPC Data Flow
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        GitHub Actions Runner                           │
-│                                                                        │
-│   ┌─────────────────────┐               ┌──────────────────────────┐   │
-│   │  Rust PEP Kernel    │               │  Python FastAPI Backend  │   │
-│   │  (dtolnay/toolchain)│               │  (pytest & Zero-Trust)   │   │
-│   └──────────┬──────────┘               └────────────┬─────────────┘   │
-│              │                                       │                 │
-│              └─────────────────┬─────────────────────┘                 │
-│                                │                                       │
-│                                ▼                                       │
-│             ┌─────────────────────────────────────┐                    │
-│             │   Docker Compose Engine Integration │                    │
-│             │                                     │                    │
-│             │   ┌──────────────┐ ┌──────────────┐ │                    │
-│             │   │  FastAPI     │ │  Native PEP  │ │                    │
-│             │   │  App (8000)  │ │ Daemon (8888)│ │                    │
-│             │   └──────┬───────┘ └──────▲───────┘ │                    │
-│             │          │  IPC / Secret  │         │                    │
-│             │          └────────────────┘         │                    │
-│             └──────────────────┬──────────────────┘                    │
-│                                │                                       │
-│                                ▼                                       │
-│             ┌─────────────────────────────────────┐                    │
-│             │     $GITHUB_STEP_SUMMARY Report     │                    │
-│             └─────────────────────────────────────┘                    │
+│                   FastAPI Control Plane (Port 8888)                    │
+│  - Authoritative Firebase RS256 Auth & Tenant Isolation                │
+│  - Z3 SMT Formal Verifier & Dual-LLM Heuristic Firewall                │
+│  - Durable SQLite WAL Revocation & Nonce Store                         │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │
+                    Local Authenticated IPC
+       (Unix Socket /run/guardrail/pep.sock / TCP 127.0.0.1:8889)
+         - Peer Credential Validation (UID/GID)
+         - HMAC-SHA256 Payload Signature
+         - Max Message Size 64KB + Protocol Version v2.5
+                                   │
+                                   ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│               Native Tier-2 Rust PEP Daemon (Fast-Path)                │
+│  - Zero GC Constant-Time HMAC Signature Check                          │
+│  - SQLite WAL Revocation & Nonce Linearity Enforcement                 │
+│  - Canonical Resource Envelope Path Component Escapement Trap          │
+│  - Active Linux Seccomp & eBPF Syscall Filter Telemetry Status         │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Container Environment File Mapping**:
-  - `GUARDRAIL_PEP_SECRET`: Passed via GitHub repository secrets or fallback default in Docker Compose.
-  - `PEP_DAEMON_PORT`: Configured to port `8888` for direct verification calls from FastAPI app.
-- **Workflow Security Checklist**:
-  - [x] Zero-trust OIDC token verification assertions
-  - [x] Pending semantic guard approval checks
-  - [x] Dual-engine benchmark validation table output
+---
+
+## 2. Key Hardening Steps & Sub-System Strategy
+
+### A. Environment & Process Supervision
+- **Single Process Management**: Remove secondary `Popen` launch in FastAPI lifespan (`app.py`). Use container entrypoint (`docker-compose.yml` / `Dockerfile`) as single process supervisor.
+- **Fail-Fast Startup Healthcheck**: In `app.py` lifespan, perform up to 30-second bounded exponential backoff retries to connect to `/run/guardrail/pep.sock` (or `127.0.0.1:8889`). Verify daemon ping response, protocol version `v2.5`, and secret handshake. Abort FastAPI startup (`sys.exit(1)`) if readiness check fails when native mode is required.
+- **Eliminate Default Secrets**: Remove hardcoded default secrets from `docker-compose.yml` and `Dockerfile`. Update reject patterns in `native_pep.rs` and `data_plane_pep.py` to block `ci_docker_compose_secret_key_`.
+
+### B. Authenticated Local IPC Protocol
+- **IPC Transport**: Primary Unix domain socket `/run/guardrail/pep.sock` with fallback TCP `127.0.0.1:8889` for non-root local dev.
+- **Authenticated Message Protocol**:
+  ```json
+  {
+    "proto_ver": "v2.5",
+    "request_id": "req_8f12a30b",
+    "timestamp": 1729000000.123,
+    "token_data": { ... },
+    "requested_action": "file_read",
+    "target_resource": "/workspace/config.json",
+    "ipc_sig": "<hmac-sha256-of-payload-using-pep-secret>"
+  }
+  ```
+- **Daemon Input Guards**: Enforce 64KB max buffer size, 1.0s socket timeout, malformed JSON rejection, and timestamp freshness check (±30s skew window).
+
+### C. Unified Revocation & Anti-Replay Guarantees
+- **Durable Revocation Checks in Native Rust**: Update `native_pep.rs` and `data_plane_pep.py` so that token/plan revocation sets are backed by `consumed_nonces.db` SQLite WAL table `revocations`.
+- **Pre-Verification Revocation Gate**: Both Python and Rust PEP engines check SQLite revocation records prior to signature verification, ensuring immediate denial across process restarts and worker processes.
+
+### D. Verification & Testing
+- **End-to-End Integration Tests**: Update `tests/test_data_plane_pep.py` and add integration tests verifying:
+  1. Daemon startup fail-fast when `REQUIRE_NATIVE_PEP=1` and daemon is down.
+  2. Immediate rejection of forbidden default secrets.
+  3. Consistent token & plan revocation denial across restarts.
+  4. IPC HMAC signature verification and rejection of forged/tampered IPC messages.
+- **Build & Lint Verification**: Run `compile_applet`, `lint_applet`, and `pytest tests/` to confirm zero regressions.

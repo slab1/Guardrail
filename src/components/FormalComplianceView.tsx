@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { PolicyTemplate, FormalPolicyRule } from "../types/guardrail";
 import { PolicyEditorModal } from "./PolicyEditorModal";
+import { safeFetchJson } from "../services/apiClient";
 
 export const FormalComplianceView: React.FC = () => {
   const [templates, setTemplates] = useState<PolicyTemplate[]>([]);
@@ -27,19 +28,17 @@ export const FormalComplianceView: React.FC = () => {
   }>({ isOpen: false, template: null });
 
   const fetchTemplates = () => {
-    fetch("/api/policies/templates")
-      .then(res => res.json())
-      .then(data => setTemplates(data))
-      .catch(err => console.error("Template fetch failed", err));
+    safeFetchJson("/api/policies/templates").then((data: any) => {
+      if (Array.isArray(data)) setTemplates(data);
+    });
   };
 
   useEffect(() => {
     fetchTemplates();
 
-    fetch("/api/compliance/config")
-      .then(res => res.json())
-      .then(data => setComplianceConfig(data))
-      .catch(err => console.error("Compliance config fetch failed", err));
+    safeFetchJson("/api/compliance/config").then((data: any) => {
+      if (data) setComplianceConfig(data);
+    });
   }, []);
 
   const [exportBundle, setExportBundle] = useState<any>(null);

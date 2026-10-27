@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Zap
 } from "lucide-react";
+import { safeFetchJson } from "../services/apiClient";
 
 interface TenantData {
   tenant_id: string;
@@ -49,17 +50,15 @@ export const IncidentAndTenantsView: React.FC<{
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
   const fetchTenants = () => {
-    fetch("/api/agents/tenants")
-      .then((res) => res.json())
-      .then((data) => setTenants(data))
-      .catch((err) => console.error("Fetch tenants failed", err));
+    safeFetchJson("/api/agents/tenants").then((data: any) => {
+      if (Array.isArray(data)) setTenants(data);
+    });
   };
 
   const fetchIncidents = () => {
-    fetch("/api/incidents/active")
-      .then((res) => res.json())
-      .then((data) => setIncidentState(data))
-      .catch((err) => console.error("Fetch incidents failed", err));
+    safeFetchJson("/api/incidents/active").then((data: any) => {
+      if (data) setIncidentState(data);
+    });
   };
 
   useEffect(() => {

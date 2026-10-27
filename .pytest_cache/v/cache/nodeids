@@ -11,6 +11,7 @@
   "tests/test_data_plane_pep.py::test_data_plane_pep_unsigned_token_rejected",
   "tests/test_data_plane_pep.py::test_durable_revocation_persistence",
   "tests/test_data_plane_pep.py::test_fail_closed_native_pep_mode",
+  "tests/test_data_plane_pep.py::test_insecure_default_secret_rejection",
   "tests/test_security_remediations.py::test_consent_blocked_when_pending_semantic",
   "tests/test_security_remediations.py::test_unauthenticated_request_raises_in_production",
   "tests/test_verifier_properties.py::test_cache_performance",

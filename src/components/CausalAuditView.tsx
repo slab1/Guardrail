@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { auth, signInWithGoogle, syncAuditEntryToFirestore } from "../services/firebase";
 
+import { safeFetchJson } from "../services/apiClient";
+
 export const CausalAuditView: React.FC = () => {
   const [logs, setLogs] = useState<any[]>([]);
   const [filter, setFilter] = useState("ALL");
@@ -24,10 +26,9 @@ export const CausalAuditView: React.FC = () => {
 
   useEffect(() => {
     const fetchLogs = () => {
-      fetch("/api/audit/logs")
-        .then(res => res.json())
-        .then(data => setLogs([...data].reverse()))
-        .catch(err => console.error("Audit fetch failed", err));
+      safeFetchJson("/api/audit/logs").then((data) => {
+        if (Array.isArray(data)) setLogs([...data].reverse());
+      });
     };
 
     fetchLogs();

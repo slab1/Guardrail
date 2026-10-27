@@ -164,3 +164,12 @@ def test_fail_closed_native_pep_mode(monkeypatch):
     res = pep.verify_and_enforce(tok.to_dict(), "file_read", "/workspace/README.md")
     assert res["verdict"] == "TRAP_DENY"
     assert "CRITICAL: Native Rust PEP daemon disconnected" in res["reason"]
+
+def test_insecure_default_secret_rejection(monkeypatch):
+    from guardrail.data_plane_pep import get_kernel_pep_secret
+    monkeypatch.setenv("GUARDRAIL_PEP_SECRET", "ci_docker_compose_secret_key_987654321")
+    
+    with pytest.raises(RuntimeError) as exc_info:
+        get_kernel_pep_secret()
+    
+    assert "insecure default value" in str(exc_info.value)
