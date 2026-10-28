@@ -3,9 +3,14 @@ dist
 .git
 .github
 venv
+.venv
 *.pyc
 __pycache__
 .pytest_cache
+data/
+*.sock
+*.db
+*.sqlite
 .env
 .env.*
 !.env.example

@@ -65,6 +65,11 @@
 - Node.js 18+ and npm
 - Python 3.10+ with `fastapi`, `uvicorn`, `pydantic`, `pytest`
 
+### Security & Credential Isolation (GitHub Safe)
+> 🔐 **CREDENTIAL HYGIENE**: `firebase-applet-config.json`, `.env`, and local kernel database ledgers (`data/`) are strictly excluded in `.gitignore` and `.dockerignore`.
+> - When deploying or cloning from GitHub, copy `firebase-applet-config.example.json` to `firebase-applet-config.json` with your project's credentials.
+> - Never commit real Firebase API keys or service credentials to public repositories.
+
 ### Installation & Launch
 
 1. **Install Node Dependencies**:
@@ -72,16 +77,22 @@
    npm install
    ```
 
-2. **Start Dev Server (Vite + FastAPI Kernel Proxy)**:
+2. **Configure Firebase (Local)**:
+   ```bash
+   cp firebase-applet-config.example.json firebase-applet-config.json
+   # Edit with your Firebase project credentials
+   ```
+
+3. **Start Dev Server (Vite + FastAPI Kernel Proxy)**:
    ```bash
    npm run dev
    ```
    - Vite UI: `http://localhost:3000`
    - FastAPI Kernel Backend: `http://localhost:8888`
 
-3. **Run Unit Tests**:
+4. **Run Unit Tests**:
    ```bash
-   PYTHONPATH=src python3 -m pytest tests/
+   python3 -m pytest tests/
    ```
 
 ---

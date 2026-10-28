@@ -84,19 +84,30 @@ The codebase has undergone comprehensive automated invariant and vulnerability v
 - **Result: 0 Medium / 0 High Vulnerabilities Identified (PASS)**
 - All socket path resolutions utilize dedicated `/run/guardrail/pep.sock` runtime directories with secure `tempfile.gettempdir()` fallbacks (CWE-377 / B108 resolved).
 
-### 4.2 Pytest Invariant Suite (21/21 Tests Passed)
+### 4.2 Pytest Invariant Suite (27/27 Tests Passed)
 - **Signature Forgery Resistance**: `test_data_plane_pep_forgery_signature_mismatch` ensures any altered bit in capability tokens triggers instant `TRAP_DENY`.
-- **Linear Replay Prevention**: `test_data_plane_pep_linear_token_replay_blocked` validates atomic single-use nonce consumption.
-- **Fail-Closed Revocation**: `test_revocation_store_fail_closed` and `test_authoritative_revocation_direct_sqlite` guarantee that database failures fail closed and external SQLite revocations immediately invalidate tokens across engines.
+- **Linear Replay Prevention**: `test_data_plane_pep_linear_token_replay_blocked` validates atomic single-use nonce consumption backed by ACID SQLite WAL transaction locks.
+- **Fail-Closed Revocation & Nonce Failure**: `test_revocation_store_fail_closed` and `test_authoritative_revocation_direct_sqlite` guarantee that database failures fail closed and external SQLite revocations immediately invalidate tokens across engines.
 - **Bilateral Authenticated IPC**: `test_authenticated_ipc_handshake_and_tamper_defense` proves HMAC challenge-response verification blocks unauthorized socket peers.
-- **Resource Boundary Canonicalization**: `test_canonical_resource_boundary_validation` proves directory traversal (`/workspace/../etc/passwd`) and prefix escapes (`/workspace-evil`) are strictly rejected.
-- **Insecure Secret Rejection**: `test_insecure_default_secret_rejection` proves default keys cannot start the engine.
+- **Component-Aware Path Boundary Validation**: `test_canonical_resource_boundary_validation` and Rust `test_path_traversal_prevention` prove directory traversal (`/workspace/../etc/passwd`), symlink escapes, and prefix escapes (`/workspace-evil`) are strictly rejected.
+- **Evidence-Bound Release Promotion Workflow**: `test_release_workflow.py` proves that production promotion requires Security Officer Sign-Off bound to the exact build artifact digest (SHA-256), dynamic Bandit static scan, dynamic invariant suite execution, and live Native PEP enforcement, with zero casual override bypasses.
+- **Role-Based Audit Enforcement**: `test_operator_cannot_review_or_promote` confirms unprivileged roles (`operator`) cannot submit sign-offs or promote releases.
 
 ### 4.3 Native Rust PEP Self-Tests
 - Command: `PEP_SELF_TEST_ONLY=1 cargo test --release`
-- Verified sub-microsecond enforcement (<0.01ms), constant-time HMAC comparison, and SQLite WAL constraint validation.
+- Verified sub-microsecond enforcement (<0.01ms), constant-time HMAC comparison, SQLite WAL constraint validation, and component-aware canonical path boundary enforcement.
 
 ---
+
+## 5. Summary of Security Remediation Actions
+
+| Issue Area | Remediation Applied |
+| :--- | :--- |
+| **Path Traversal Escape** | Implemented component-aware canonical path validation (`normalize_path_components` + `canonicalize` + `Path::starts_with`) in both Rust (`native_pep.rs`) and Python (`data_plane_pep.py`). Traversal attacks like `/workspace/../etc/passwd` and sibling escapes like `/workspace-evil` are strictly blocked. |
+| **Fail-Closed Store Outages** | `DurableNonceStore` now raises `RuntimeError` on database errors during init or nonce consumption, and `verify_and_enforce()` catches store exceptions to return `TRAP_DENY`. Database outages cannot yield `ALLOW` decisions. |
+| **Release Gate Security** | Replaced hardcoded status gates with dynamic evidence verification. `POST /api/release/review` strictly requires `security_officer` or `super_admin` role and binds sign-offs to the SHA-256 `artifact_digest`. |
+| **Promotion Override Removal** | Removed `override_warning` bypass from normal promotion logic. `POST /api/release/promote` independently evaluates all 4 mandatory gates dynamically before issuing a promotion certificate. |
+
 
 ## 5. Contact & Vulnerability Reporting
 

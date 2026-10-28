@@ -5,7 +5,7 @@ FROM node:22-alpine AS frontend-builder
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-COPY firebase-applet-config.json firebase-blueprint.json ./
+COPY firebase-applet-config*.json firebase-blueprint.json ./
 RUN npm ci
 
 COPY tsconfig.json tsconfig.node.json vite.config.ts postcss.config.js tailwind.config.js index.html ./
@@ -52,7 +52,7 @@ RUN pip install --no-cache-dir -r requirements.txt uvicorn
 COPY app.py requirements.txt ./
 COPY src ./src
 COPY data ./data
-COPY firebase-applet-config.json firebase-blueprint.json firestore.rules ./
+COPY firebase-applet-config*.json firebase-blueprint.json firestore.rules ./
 
 # Copy compiled static frontend build
 COPY --from=frontend-builder /app/dist ./dist

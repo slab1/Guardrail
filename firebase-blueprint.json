@@ -38,6 +38,26 @@
         "plan_hash": { "type": "string", "maxLength": 64 }
       },
       "required": ["id", "intent", "status", "user_id"]
+    },
+    "DeveloperReview": {
+      "title": "Developer Review",
+      "description": "Developer Preview review sign-off and safety audit record.",
+      "type": "object",
+      "properties": {
+        "review_id": { "type": "string", "maxLength": 128 },
+        "reviewer_name": { "type": "string", "maxLength": 128 },
+        "reviewer_role": { "type": "string", "maxLength": 128 },
+        "organization": { "type": "string", "maxLength": 128 },
+        "artifact_digest": { "type": "string", "maxLength": 64 },
+        "test_suite_verified": { "type": "boolean" },
+        "invariants_verified": { "type": "boolean" },
+        "pep_benchmarks_verified": { "type": "boolean" },
+        "comments": { "type": "string", "maxLength": 2048 },
+        "decision": { "type": "string", "enum": ["APPROVED", "NEEDS_REMEDIATION"] },
+        "timestamp": { "type": "number" },
+        "user_id": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["review_id", "reviewer_name", "reviewer_role", "artifact_digest", "comments", "decision", "timestamp", "user_id"]
     }
   },
   "firestore": {
@@ -48,6 +68,10 @@
     "/active_plans/{planId}": {
       "schema": "ActivePlan",
       "description": "Stateful agent execution plans with role and status constraints"
+    },
+    "/developer_reviews/{reviewId}": {
+      "schema": "DeveloperReview",
+      "description": "Developer Preview sign-offs and reviews"
     }
   }
 }

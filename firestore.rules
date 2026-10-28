@@ -55,6 +55,21 @@ service cloud.firestore {
              data.user_id == request.auth.uid;
     }
 
+    // Entity Validation Blueprint: DeveloperReview
+    function isValidDeveloperReview(data) {
+      return data.keys().hasAll(['review_id', 'reviewer_name', 'reviewer_role', 'artifact_digest', 'comments', 'decision', 'timestamp', 'user_id']) &&
+             data.keys().hasOnly(['review_id', 'reviewer_name', 'reviewer_role', 'organization', 'artifact_digest', 'test_suite_verified', 'invariants_verified', 'pep_benchmarks_verified', 'comments', 'decision', 'timestamp', 'user_id', 'email']) &&
+             data.review_id is string && data.review_id.size() <= 128 &&
+             data.reviewer_name is string && data.reviewer_name.size() <= 128 &&
+             data.reviewer_role is string && data.reviewer_role.size() <= 128 &&
+             data.artifact_digest is string && data.artifact_digest.size() <= 64 &&
+             data.comments is string && data.comments.size() <= 2048 &&
+             data.decision in ['APPROVED', 'NEEDS_REMEDIATION'] &&
+             data.timestamp is number &&
+             data.user_id is string && data.user_id.size() <= 128 &&
+             data.user_id == request.auth.uid;
+    }
+
     // 2. Healthcheck & Test Collection
     match /test/{docId} {
       allow get: if true;
@@ -97,6 +112,13 @@ service cloud.firestore {
                       );
 
       allow delete: if isAdmin();
+    }
+
+    // 5. Developer Reviews: Visible to All Authenticated Devs, Append-Only with Valid Identity
+    match /developer_reviews/{reviewId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(reviewId) && isValidDeveloperReview(incoming());
+      allow update, delete: if isAdmin();
     }
   }
 }

@@ -184,13 +184,15 @@ class DurableNonceStore:
                 rows = cur.fetchall()
                 self._hot_cache = {r[0] for r in rows}
         except Exception as e:
-            print(f"[!] Warning: DurableNonceStore init failed: {e}")
+            print(f"[!] Critical Error: DurableNonceStore init failed: {e}")
+            raise RuntimeError(f"DurableNonceStore init failed (Fail-Closed): {e}")
 
     def consume_nonce(self, nonce: str, token_id: str, plan_id: str, expires_at: float) -> bool:
         """
         Atomically attempts to consume a nonce.
         Returns True if newly consumed (valid linear use).
         Returns False if already consumed (replay attack).
+        Raises RuntimeError on database error to ensure fail-closed denial.
         """
         if not nonce:
             return False
@@ -223,8 +225,8 @@ class DurableNonceStore:
                 return False
             except Exception as e:
                 # Fail-closed in case of database error
-                print(f"[!] Database error during nonce consumption: {e}")
-                return False
+                print(f"[!] Critical Error: Database error during nonce consumption: {e}")
+                raise RuntimeError(f"DurableNonceStore consumption failed (Fail-Closed): {e}")
 
     def cleanup_expired(self):
         now = time.time()
@@ -708,8 +710,20 @@ class DataPlanePEP:
             }
 
         # 5. Atomic Replay Protection (Linear Token Enforcement)
-        # Atomically consume nonce in durable store
-        consumed_ok = self.nonce_store.consume_nonce(nonce, token_id, plan_id, expires_at)
+        # Atomically consume nonce in durable store (Fail-Closed)
+        try:
+            consumed_ok = self.nonce_store.consume_nonce(nonce, token_id, plan_id, expires_at)
+        except Exception as e:
+            latency = (time.perf_counter() - t0) * 1000
+            self._record_trap("NONCE_STORE_FAILURE", requested_action, target_resource, f"Durable replay store failure: {e}")
+            return {
+                "verdict": "TRAP_DENY",
+                "reason": f"Durable replay protection store failure (Fail-Closed): {e}",
+                "syscall_trap": "SIGSYS",
+                "latency_ms": latency,
+                "tier": "Tier-2 Data Plane (Hardware-Adjacent PEP)"
+            }
+
         if not consumed_ok:
             latency = (time.perf_counter() - t0) * 1000
             self._record_trap("REPLAY_ATTACK", requested_action, target_resource, f"Reused capability nonce: {nonce}")

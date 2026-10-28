@@ -1,14 +1,43 @@
-# .gitignore
+# ==============================================================================
+# SENSITIVE CREDENTIALS & SECRETS (STRICTLY EXCLUDED FROM GITHUB)
+# ==============================================================================
+firebase-applet-config.json
+firebase_applet_config.xml
+*.secret
+*.key
+*.pem
+*.cert
+*.crt
+*.pfx
+*.p12
 
-# Python bytecode
+# Environment variables & local secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Local persistent kernel storage, audit ledgers, & IPC sockets
+data/
+*.sock
+*.sqlite
+*.sqlite3
+*.db
+*.wal
+*.tmp
+guardrail_pep.sock
+
+# Python bytecode & virtual environments
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Virtual environments
 .venv/
 env/
 venv/
+
+# Node & package manager directories
+node_modules/
+.npm/
 
 # IDE / editor folders
 .vscode/
@@ -22,11 +51,11 @@ dist/
 *.egg-info/
 *.egg
 
-# macOS
-.DS_Store
-
-# Logs
-*.log
+# Testing & coverage caches
+.pytest_cache/
+coverage/
+.nyc_output/
 
 # OS files
+.DS_Store
 Thumbs.db

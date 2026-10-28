@@ -361,25 +361,49 @@ impl NativeDataPlanePEP {
         Ok(elapsed)
     }
 
+    fn normalize_path_components(path_str: &str) -> std::path::PathBuf {
+        use std::path::{Component, Path, PathBuf};
+        let p = Path::new(path_str);
+        let mut normalized = PathBuf::new();
+        for comp in p.components() {
+            match comp {
+                Component::Prefix(prefix) => normalized.push(Component::Prefix(prefix)),
+                Component::RootDir => normalized.push(Component::RootDir),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if let Some(last) = normalized.components().last() {
+                        if matches!(last, Component::Normal(_)) {
+                            normalized.pop();
+                        }
+                    }
+                }
+                Component::Normal(c) => normalized.push(c),
+            }
+        }
+        normalized
+    }
+
     fn is_within_boundary(&self, target: &str, boundary: &str) -> bool {
+        use std::path::Path;
+
         let clean_boundary = boundary.trim_end_matches('*');
-        if clean_boundary == "" || clean_boundary == "/" {
+        if clean_boundary.is_empty() || clean_boundary == "/" {
             return true;
         }
 
-        // Exact match
-        if target == clean_boundary {
-            return true;
-        }
-
-        // Directory component boundary: must follow with path separator
-        let sep_boundary = if clean_boundary.ends_with('/') {
-            clean_boundary.to_string()
+        let norm_target = if let Ok(canon) = std::fs::canonicalize(Path::new(target)) {
+            canon
         } else {
-            format!("{}/", clean_boundary)
+            Self::normalize_path_components(target)
         };
 
-        target.starts_with(&sep_boundary)
+        let norm_boundary = if let Ok(canon) = std::fs::canonicalize(Path::new(clean_boundary)) {
+            canon
+        } else {
+            Self::normalize_path_components(clean_boundary)
+        };
+
+        norm_target.starts_with(&norm_boundary)
     }
 }
 
@@ -854,5 +878,30 @@ mod tests {
         token.signature = pep.compute_signature(&token);
 
         assert!(pep.verify_and_enforce(&token, "file_read", "/workspace-evil/hacked").is_err());
+    }
+
+    #[test]
+    fn test_path_traversal_prevention() {
+        let secret = b"ci_pipeline_secure_random_key_987654321".to_vec();
+        let mut pep = NativeDataPlanePEP::new(secret, ":memory:").unwrap();
+
+        let mut token = CapabilityToken {
+            token_id: "tok_test03".to_string(),
+            plan_id: "plan_test".to_string(),
+            step_id: "step_2".to_string(),
+            action_type: "file_read".to_string(),
+            resource: "/workspace".to_string(),
+            autonomy_level: 1,
+            issued_at: 1000,
+            expires_at: 4102444800,
+            nonce: "nonce_unique_3".to_string(),
+            signature: String::new(),
+        };
+        token.signature = pep.compute_signature(&token);
+
+        // Path traversal attack: /workspace/../etc/passwd must fail
+        assert!(pep.verify_and_enforce(&token, "file_read", "/workspace/../etc/passwd").is_err());
+        assert!(pep.verify_and_enforce(&token, "file_read", "/workspace/../../etc/shadow").is_err());
+        assert!(pep.verify_and_enforce(&token, "file_read", "/workspace/./../../root/.ssh/id_rsa").is_err());
     }
 }

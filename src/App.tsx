@@ -9,6 +9,7 @@ import { AuthZENView } from "./components/AuthZENView";
 import { ConsentView } from "./components/ConsentView";
 import { DualTierArchView } from "./components/DualTierArchView";
 import { IncidentAndTenantsView } from "./components/IncidentAndTenantsView";
+import { GitHubReviewView } from "./components/GitHubReviewView";
 import { ExplainDenyModal } from "./components/ExplainDenyModal";
 import { TokenInspectorModal } from "./components/TokenInspectorModal";
 import { AutonomyLevel, ValidatedPlan } from "./types/guardrail";
@@ -216,6 +217,9 @@ export const App: React.FC = () => {
             onInspectToken={handleOpenTokenInspector}
             onNavigateTab={setActiveTab}
           />
+        )}
+        {activeTab === "github" && (
+          <GitHubReviewView />
         )}
         {activeTab === "dualtier" && (
           <DualTierArchView />

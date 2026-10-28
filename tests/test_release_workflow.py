@@ -30,7 +30,7 @@ def test_unauthorized_promote_without_approval_rejected(client):
     
     res = client.post("/api/release/promote", json={"override_warning": False})
     assert res.status_code == 400
-    assert "Developer Review Sign-Off" in res.json()["detail"]
+    assert "Security Officer Sign-Off" in res.json()["detail"]
 
 def test_submit_developer_review(client):
     payload = {
@@ -64,6 +64,21 @@ def test_promote_to_production_after_review(client):
     assert promoted_data["release_info"]["current_stage"] == "PRODUCTION_RELEASE"
     assert promoted_data["release_info"]["version"] == "v2.5.0-GA"
     assert promoted_data["release_info"]["promotion_hash"] is not None
+
+def test_operator_cannot_review_or_promote():
+    # Operator client without admin/security_officer role
+    op_client = TestClient(app)
+    # Default without auth header has role 'operator'
+    review_res = op_client.post("/api/release/review", json={
+        "reviewer_name": "Unauthorized User",
+        "reviewer_role": "Operator",
+        "comments": "Should fail",
+        "decision": "APPROVED"
+    })
+    assert review_res.status_code == 403 or review_res.status_code == 400
+
+    promote_res = op_client.post("/api/release/promote", json={})
+    assert promote_res.status_code == 403 or promote_res.status_code == 400
 
 def test_rollback_to_developer_preview(client):
     rollback_res = client.post("/api/release/rollback")
