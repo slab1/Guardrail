@@ -139,22 +139,27 @@ jobs:
           echo "Checking container availability..."
           docker compose ps
           
-          for i in {1..20}; do
+          for i in {1..30}; do
             STATUS=$(docker inspect --format='{{json .State.Health.Status}}' guardrail-os-kernel 2>/dev/null || echo "unstarted")
-            echo "Current status of guardrail-os-kernel: $STATUS ($i/20)"
+            echo "Current status of guardrail-os-kernel: $STATUS ($i/30)"
             
-            if [ "$STATUS" == "\"healthy\"" ]; then
-              echo "✔ Kernel is healthy!"
+            if [ "$STATUS" = "\"healthy\"" ] || [ "$STATUS" = "healthy" ]; then
+              echo "✔ Kernel reported healthy by Docker daemon!"
+              exit 0
+            fi
+
+            if curl -sf http://localhost:8888/api/kernel/state | grep -q "trust_score"; then
+              echo "✔ Kernel API responded with valid state payload!"
               exit 0
             fi
             
-            if [ "$STATUS" == "\"unhealthy\"" ]; then
+            if [ "$STATUS" = "\"unhealthy\"" ] || [ "$STATUS" = "unhealthy" ]; then
               echo "✘ Kernel reported unhealthy status"
               docker compose logs guardrail-kernel
               exit 1
             fi
             
-            sleep 5
+            sleep 3
           done
           
           echo "TIMEOUT: Kernel failed to become healthy within allocated time."

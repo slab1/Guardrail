@@ -90,9 +90,10 @@ jobs:
           GUARDRAIL_PEP_SECRET: "ci_pipeline_secure_random_key_987654321"
           PEP_SELF_TEST_ONLY: "1"
         run: |
+          mkdir -p data
           rustc --version
           cargo test --verbose
-          cargo run --release
+          cargo run --release -- --self-test
 
 
   # ---------------------------------------------------------------

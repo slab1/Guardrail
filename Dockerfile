@@ -19,6 +19,8 @@ RUN npm run build
 FROM rust:1.80-slim AS rust-builder
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 # Compile the native Tier-2 Data Plane PEP daemon with release optimizations
 RUN cargo build --release && \

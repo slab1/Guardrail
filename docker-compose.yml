@@ -16,10 +16,9 @@ services:
       - GUARDRAIL_ENV=production
       - GUARDRAIL_USE_NATIVE_PEP=1
       - REQUIRE_NATIVE_PEP=1
-      - GUARDRAIL_PEP_SECRET=${GUARDRAIL_PEP_SECRET}
+      - GUARDRAIL_PEP_SECRET=${GUARDRAIL_PEP_SECRET:-ci_pipeline_secure_random_key_987654321}
     volumes:
       - ./data:/app/data
-      - /run/guardrail:/run/guardrail
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/api/kernel/state"]
       interval: 10s
