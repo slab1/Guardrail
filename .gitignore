@@ -18,7 +18,8 @@ firebase_applet_config.xml
 !.env.example
 
 # Local persistent kernel storage, audit ledgers, & IPC sockets
-data/
+data/*
+!data/.gitkeep
 *.sock
 *.sqlite
 *.sqlite3

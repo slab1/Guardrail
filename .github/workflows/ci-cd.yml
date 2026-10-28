@@ -22,6 +22,12 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Ensure Configuration Files Present
+        run: |
+          if [ ! -f firebase-applet-config.json ]; then
+            cp firebase-applet-config.example.json firebase-applet-config.json
+          fi
+
       - name: Install Dependencies with Bun
         run: bun install --frozen-lockfile
 
@@ -47,6 +53,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
+      - name: Prepare Test Environment
+        run: |
+          mkdir -p data
+          if [ ! -f firebase-applet-config.json ]; then
+            cp firebase-applet-config.example.json firebase-applet-config.json
+          fi
+
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
@@ -56,6 +69,7 @@ jobs:
       - name: Run Backend Pytest Suite
         env:
           PYTHONPATH: src
+          GUARDRAIL_PEP_SECRET: "ci_pipeline_secure_random_key_987654321"
         run: python -m pytest tests/ --cov=src/guardrail --cov-report=term-missing
 
   # ---------------------------------------------------------------
@@ -148,6 +162,13 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Prepare Build Context
+        run: |
+          mkdir -p data
+          if [ ! -f firebase-applet-config.json ]; then
+            cp firebase-applet-config.example.json firebase-applet-config.json
+          fi
 
       - name: Build Docker Production Image
         uses: docker/build-push-action@v5

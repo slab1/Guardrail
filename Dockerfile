@@ -6,6 +6,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY firebase-applet-config*.json firebase-blueprint.json ./
+RUN if [ ! -f firebase-applet-config.json ]; then cp firebase-applet-config.example.json firebase-applet-config.json; fi
 RUN npm ci
 
 COPY tsconfig.json tsconfig.node.json vite.config.ts postcss.config.js tailwind.config.js index.html ./
@@ -37,7 +38,7 @@ ENV PYTHONUNBUFFERED=1 \
     GUARDRAIL_USE_NATIVE_PEP=1 \
     REQUIRE_NATIVE_PEP=1
 
-RUN mkdir -p /run/guardrail && chmod 0755 /run/guardrail
+RUN mkdir -p /run/guardrail /app/data && chmod 0755 /run/guardrail /app/data
 
 # Install system dependencies including libseccomp
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -51,8 +52,8 @@ RUN pip install --no-cache-dir -r requirements.txt uvicorn
 
 COPY app.py requirements.txt ./
 COPY src ./src
-COPY data ./data
 COPY firebase-applet-config*.json firebase-blueprint.json firestore.rules ./
+RUN if [ ! -f firebase-applet-config.json ]; then cp firebase-applet-config.example.json firebase-applet-config.json; fi
 
 # Copy compiled static frontend build
 COPY --from=frontend-builder /app/dist ./dist

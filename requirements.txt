@@ -6,4 +6,5 @@ python-multipart
 pydantic
 python-dotenv
 google-generativeai
+google-auth
 httpx

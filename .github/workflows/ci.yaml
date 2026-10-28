@@ -24,6 +24,12 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Ensure Configuration Files Present
+        run: |
+          if [ ! -f firebase-applet-config.json ]; then
+            cp firebase-applet-config.example.json firebase-applet-config.json
+          fi
+
       - name: Install Node Dependencies
         run: npm ci
 
@@ -46,6 +52,13 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
+      - name: Prepare Test Environment
+        run: |
+          mkdir -p data
+          if [ ! -f firebase-applet-config.json ]; then
+            cp firebase-applet-config.example.json firebase-applet-config.json
+          fi
+
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
@@ -55,11 +68,13 @@ jobs:
       - name: Execute Pytest Property Verification Suite
         env:
           PYTHONPATH: src
+          GUARDRAIL_PEP_SECRET: "ci_pipeline_secure_random_key_987654321"
         run: python -m pytest tests/ -v --cov=src/guardrail --cov-report=term-missing
 
       - name: Verify Live Fast-Path PEP Latency (< 1ms Target)
         env:
           PYTHONPATH: src
+          GUARDRAIL_PEP_SECRET: "ci_pipeline_secure_random_key_987654321"
         run: python -m pytest tests/test_data_plane_pep.py -k "test_data_plane_pep_happy_path" -v
 
   # ---------------------------------------------------------------
@@ -112,7 +127,12 @@ jobs:
       - name: Build and Start Services
         env:
           GUARDRAIL_PEP_SECRET: "ci_pipeline_secure_random_key_987654321"
-        run: docker compose up -d --build
+        run: |
+          mkdir -p data
+          if [ ! -f firebase-applet-config.json ]; then
+            cp firebase-applet-config.example.json firebase-applet-config.json
+          fi
+          docker compose up -d --build
 
       - name: Wait for Kernel Health Check
         run: |
