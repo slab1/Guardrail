@@ -8,3 +8,6 @@ python-dotenv
 google-generativeai
 google-auth
 httpx
+bandit
+pytest
+pytest-cov

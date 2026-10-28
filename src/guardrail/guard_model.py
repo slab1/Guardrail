@@ -1,7 +1,10 @@
 import os
 import time
 import json
-import google.generativeai as genai
+import warnings
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", category=FutureWarning)
+    import google.generativeai as genai
 from typing import Dict, Any, List, Optional
 
 # Initialize the Gemini Guard Model

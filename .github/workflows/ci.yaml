@@ -63,7 +63,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov
+          pip install pytest pytest-cov bandit
 
       - name: Execute Pytest Property Verification Suite
         env:
